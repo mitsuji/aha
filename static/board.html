@@ -1,0 +1,25 @@
+<html>
+  <head>
+    <meta content="text/html" charset="UTF-8"/> 
+    <title>AHA :: Board</title>
+    <script src="//ajax.googleapis.com/ajax/libs/jquery/1.9.0/jquery.min.js"></script>
+    <script type="text/javascript" src="common.js"></script>
+    <script type="text/javascript" src="board.js"></script>
+  </head>
+  <body>
+    <form>
+      <div id="connectionStatus">
+	<div style="background-color:green;" class="ok">接続OK</div>
+	<div style="background-color:red;" class="ng">接続NG(リロードしてください)</div>
+      </div>
+      <div id="slaveAddress"></div>
+      <div style="float:left;">
+	<img id="qr" src="" />
+      </div>
+      <div>
+	<input id="reset" type="button" value="reset" />
+      </div>
+      <div id="total" style="font-size:640px;"></div>
+    </form>
+  </body>
+</html>
