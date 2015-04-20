@@ -33,26 +33,13 @@ var cookieUtil = function() {
 
 var webSocketUtil = function() {
 
-    var private_getHost = function() {
-	var h = window.location.hostname;
-	if (h == '') h = 'localhost';
-	return h;
-    };
-    
     return {
-	
-	//
-	// カレントホスト取得
-	//
-	getHost: function() {
-	    return private_getHost();
-	},
 	
 	//
 	// WebSoket生成
 	//
-	webSocket: function (path, port) {
-	    var uri = 'ws://' + private_getHost() + ':' + port + path;
+	webSocket: function (path) {
+	    var uri = 'ws://' + window.location.host + path;
 	    var Socket = "MozWebSocket" in window ? MozWebSocket : WebSocket;
 	    return new Socket(uri);
 	}
