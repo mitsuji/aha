@@ -33,7 +33,7 @@ $(document).ready(function () {
 	//
 	// WebSocketクライアントの実装
 	//
-	var ws = webSocketUtil.webSocket( url, 9999 );
+	var ws = webSocketUtil.webSocket(url);
 	
 	ws.onopen = function() {
 	    setConnect(true);

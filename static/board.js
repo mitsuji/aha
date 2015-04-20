@@ -25,7 +25,7 @@ $(document).ready(function () {
     //
     // WebSocketクライアントの実装
     //
-    var ws = webSocketUtil.webSocket(url, 9999);
+    var ws = webSocketUtil.webSocket(url);
 
     ws.onopen = function() {
 	setConnect(true);
@@ -40,7 +40,7 @@ $(document).ready(function () {
 	eval (" var json = " + event.data + ";" ); // [TODO] must be danger
 	if( json.type == 'bk') {
 	    cookieUtil.setCookie('bk',json.bsk);
-	    var slave_url = 'http://' + webSocketUtil.getHost() + ':9999/reporter.html?' + json.bpk ;
+	    var slave_url = 'http://' + window.location.host + '/reporter.html?' + json.bpk ;
 	    var qr_url = 'https://chart.googleapis.com/chart';
 	    qr_url += '?chs=300x300&cht=qr&chl=' + slave_url;
 	    $('#slaveAddress').text(slave_url);
