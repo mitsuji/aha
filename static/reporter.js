@@ -59,9 +59,9 @@ $(document).ready(function () {
 	//
 	// AHAボタン押下
 	//
-	$('#aha').click(function () {
+	$('#aha')[0].addEventListener("touchend",function(e){
             ws.send('aha');
-	});
+	},false);
 	
     }
 
