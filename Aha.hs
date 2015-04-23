@@ -9,7 +9,7 @@ import Network.Wai.Handler.WebSockets (websocketsOr)
 import Data.FileEmbed (embedDir)
 import Control.Monad (forever, when)
 import Control.Concurrent (forkIO, MVar, newMVar, readMVar, modifyMVar, modifyMVar_)
-import Control.Exception (catch, finally, SomeException, ErrorCall)   
+import Control.Exception (catch, finally)
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Monoid (mappend)
