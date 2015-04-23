@@ -44,7 +44,9 @@ connection b = bconn $ unBoard b
 
 
 setConnection :: Board -> WS.Connection -> Board
-setConnection b conn = Board $ bi { bconn = Just conn }
+setConnection b conn = case bconn bi of
+  Just _ -> error "active session"
+  Nothing -> Board $ bi { bconn = Just conn } 
   where
     bi = unBoard b
 
@@ -76,7 +78,9 @@ setReporterConnection b rk conn = Board $ bi { reporters = reporters' }
     reporter = case Map.lookup rk (reporters bi) of
       Just r -> r
       Nothing -> error "invalid reporter key"
-    reporter' = reporter { rconn = Just conn }
+    reporter' = case rconn reporter of
+      Just _ -> error "active session"
+      Nothing -> reporter { rconn = Just conn }
     reporters' = Map.insert rk reporter' (reporters bi)
     bi = unBoard b
 
