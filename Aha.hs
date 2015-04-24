@@ -9,7 +9,7 @@ import Network.Wai.Handler.WebSockets (websocketsOr)
 import Data.FileEmbed (embedDir)
 import Control.Monad (forever, when)
 import Control.Concurrent (forkIO, MVar, newMVar, readMVar, modifyMVar, modifyMVar_)
-import Control.Exception (catch, finally)
+import Control.Exception (finally)
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Monoid (mappend)
@@ -85,11 +85,13 @@ boardServer vstate pconn = do
     query = parseSimpleQuery $ BS.dropWhile (/='?') requestPath
     requestPath = WS.requestPath $ WS.pendingRequest pconn
     resume state bsk bpk conn = do
+      -- resume
       let vboard = fromJust $ boardFromPublicKey state bpk
-      board <- modifyMVar vboard $ \board -> do
-        let board' = setConnection board conn
-        return (board',board')
+      board <- modifyMVar vboard $ \board -> case setConnection board conn of
+        Left msg -> error msg
+        Right board' -> return (board', board')
       putStrLn $ "resume board: " ++ bsk ++ ": " ++ bpk
+      -- send current total
       WS.sendTextData conn $ totalJson $ boardAhaCount board
       return(bsk, bpk ,vboard)
     create conn = do
@@ -162,11 +164,15 @@ reporterServer vstate pconn = do
     query = parseSimpleQuery $ BS.dropWhile (/='?') requestPath
     requestPath = WS.requestPath $ WS.pendingRequest pconn
     resume vboard rk conn = do
-      board <- modifyMVar vboard $ \board -> do
-        let board' = setReporterConnection board rk conn
-        return (board', board')
+      -- resume
+      board <- modifyMVar vboard $ \board -> case setReporterConnection board rk conn of
+        Left msg -> error msg
+        Right board' -> return (board', board')
       putStrLn $ "resume reporter: " ++ rk
-      WS.sendTextData conn $ ahaCountJson $ reporterAhaCount board rk
+      -- send current ahaCount
+      case reporterAhaCount board rk of
+        Left msg -> error msg
+        Right count -> WS.sendTextData conn $ ahaCountJson count
       return rk
     create vboard conn = do
       rkUUID <- nextUUID
@@ -175,7 +181,9 @@ reporterServer vstate pconn = do
       putStrLn $ "create reporter: " ++ rk
       return rk
     disconnect vboard rk =
-      modifyMVar_ vboard $ \board -> return $ closeReporterConnection board rk
+      modifyMVar_ vboard $ \board -> case closeReporterConnection board rk of
+        Left msg -> error msg
+        Right board' -> return board'
 
 
 reporterTalk :: WS.Connection -> MVar Board -> ReporterKey -> IO ()
@@ -183,10 +191,10 @@ reporterTalk conn vboard rk = forever $ do
   msg <- WS.receiveData conn :: IO BS.ByteString
 --  BS.putStrLn $ "msg slave: " `BS.append` BS.pack (show mk) `BS.append` ": " `BS.append` BS.pack (show sk) `BS.append` ": " `BS.append` msg
 
-  (board, ahaCount, total) <- modifyMVar vboard $ \board -> do
-    let r@(board', _, _) = aha board rk
-    return (board', r)
-    
+  (board, ahaCount, total) <- modifyMVar vboard $ \board -> case aha board rk of
+    Left msg -> error msg
+    Right r@(board', _, _) -> return (board', r)
+                              
   -- board connection
   let bconn = connection board
   -- send new total to board

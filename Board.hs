@@ -19,6 +19,7 @@ module Board (
 import qualified Network.WebSockets as WS
 import qualified Data.Map.Strict as Map
 import Data.Maybe(catMaybes)
+import Data.Either(Either(Right,Left))
 
 type ReporterKey = String
 
@@ -43,8 +44,8 @@ connection :: Board -> Maybe WS.Connection
 connection b = bconn $ unBoard b
 
 
-setConnection :: Board -> WS.Connection -> Board
-setConnection b conn = case bconn bi of
+setConnection :: Board -> WS.Connection -> Either String Board
+setConnection b conn = Right $ case bconn bi of
   Just _ -> error "active session"
   Nothing -> Board $ bi { bconn = Just conn } 
   where
@@ -72,8 +73,8 @@ reporterConnections b = catMaybes
                         $ Map.elems (reporters $ unBoard b)
 
 
-setReporterConnection :: Board -> ReporterKey -> WS.Connection -> Board
-setReporterConnection b rk conn = Board $ bi { reporters = reporters' }
+setReporterConnection :: Board -> ReporterKey -> WS.Connection -> Either String Board
+setReporterConnection b rk conn = Right $ Board $ bi { reporters = reporters' }
   where
     reporter = case Map.lookup rk (reporters bi) of
       Just r -> r
@@ -85,8 +86,8 @@ setReporterConnection b rk conn = Board $ bi { reporters = reporters' }
     bi = unBoard b
 
 
-closeReporterConnection :: Board -> ReporterKey -> Board
-closeReporterConnection b rk = Board $ bi { reporters = reporters' }
+closeReporterConnection :: Board -> ReporterKey -> Either String Board
+closeReporterConnection b rk = Right $Board $ bi { reporters = reporters' }
   where
     reporter = case Map.lookup rk (reporters bi) of
       Just r -> r
@@ -103,8 +104,8 @@ reset b = Board $ bi { reporters = reporters' }
     bi = unBoard b
 
 
-aha :: Board -> ReporterKey -> (Board, Int, Int)
-aha b rk = ( Board $ bi { reporters = reporters' }, ahaCount', total')
+aha :: Board -> ReporterKey -> Either String (Board, Int, Int)
+aha b rk = Right $( Board $ bi { reporters = reporters' }, ahaCount', total')
   where
     reporter = case Map.lookup rk (reporters bi) of
       Just r -> r
@@ -116,8 +117,8 @@ aha b rk = ( Board $ bi { reporters = reporters' }, ahaCount', total')
     bi = unBoard b
 
 
-reporterAhaCount :: Board -> ReporterKey -> Int
-reporterAhaCount b rk = ahaCount reporter
+reporterAhaCount :: Board -> ReporterKey -> Either String Int
+reporterAhaCount b rk = Right $ ahaCount reporter
   where
     reporter = case Map.lookup rk (reporters bi) of
       Just r -> r
