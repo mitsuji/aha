@@ -45,9 +45,9 @@ connection b = bconn $ unBoard b
 
 
 setConnection :: Board -> WS.Connection -> Either String Board
-setConnection b conn = Right $ case bconn bi of
-  Just _ -> error "active session"
-  Nothing -> Board $ bi { bconn = Just conn } 
+setConnection b conn = case bconn bi of
+  Just _ -> Left "active session"
+  Nothing -> Right $ Board $ bi { bconn = Just conn } 
   where
     bi = unBoard b
 
@@ -60,10 +60,10 @@ reporter :: Board -> ReporterKey -> Bool
 reporter b rk = Map.member rk (reporters $ unBoard b)
 
 addReporter :: Board -> ReporterKey -> WS.Connection -> Board
-addReporter b rk conn = Board $ bi { reporters = reporters' }
+addReporter b rk conn = Board $ bi { reporters = rs' }
   where
-    reporters' = Map.insert rk (newReporter rconn) (reporters bi)
-    newReporter rconn = Reporter (Just conn) 0
+    rs' = Map.insert rk r' (reporters bi)
+    r' = Reporter (Just conn) 0
     bi = unBoard b
     
 
@@ -74,56 +74,50 @@ reporterConnections b = catMaybes
 
 
 setReporterConnection :: Board -> ReporterKey -> WS.Connection -> Either String Board
-setReporterConnection b rk conn = Right $ Board $ bi { reporters = reporters' }
+setReporterConnection b rk conn = case Map.lookup rk rs of
+  Nothing -> Left "invalid reporter key"
+  Just r -> case rconn r of
+    Just _ -> Left "active session"
+    Nothing -> Right $ Board $ bi { reporters = rs' r }
   where
-    reporter = case Map.lookup rk (reporters bi) of
-      Just r -> r
-      Nothing -> error "invalid reporter key"
-    reporter' = case rconn reporter of
-      Just _ -> error "active session"
-      Nothing -> reporter { rconn = Just conn }
-    reporters' = Map.insert rk reporter' (reporters bi)
+    rs' r = Map.insert rk (r { rconn = Just conn }) rs
+    rs = reporters bi
     bi = unBoard b
 
 
 closeReporterConnection :: Board -> ReporterKey -> Either String Board
-closeReporterConnection b rk = Right $Board $ bi { reporters = reporters' }
+closeReporterConnection b rk = case Map.lookup rk rs of
+  Nothing -> Left "invalid reporter key"
+  Just r -> Right $ Board $ bi { reporters = rs' r }
   where
-    reporter = case Map.lookup rk (reporters bi) of
-      Just r -> r
-      Nothing -> error "invalid reporter key"
-    reporter' = reporter { rconn = Nothing }
-    reporters' = Map.insert rk reporter' (reporters bi)
+    rs' r = Map.insert rk (r { rconn = Nothing }) rs
+    rs = reporters bi
     bi = unBoard b
-
+         
 
 reset :: Board -> Board
-reset b = Board $ bi { reporters = reporters' }
+reset b = Board $ bi { reporters = rs' }
   where
-    reporters' = Map.map (\reporter -> reporter { ahaCount = 0 }) (reporters bi)
+    rs' = Map.map (\r -> r { ahaCount = 0 }) (reporters bi)
     bi = unBoard b
 
 
 aha :: Board -> ReporterKey -> Either String (Board, Int, Int)
-aha b rk = Right $( Board $ bi { reporters = reporters' }, ahaCount', total')
+aha b rk = case Map.lookup rk rs of
+  Nothing -> Left "invalid reporter key"
+  Just r -> Right $ (Board $ bi { reporters = rs' r }, ac' r, to' r)
   where
-    reporter = case Map.lookup rk (reporters bi) of
-      Just r -> r
-      Nothing -> error "invalid reporter key"
-    ahaCount' = (ahaCount reporter) +1
-    reporter' = reporter { ahaCount = ahaCount' }
-    reporters' = Map.insert rk reporter' (reporters bi)
-    total' = Map.foldl' (\acc (Reporter _ count) -> acc + count) 0 reporters'
+    rs' r = Map.insert rk r { ahaCount = ac' r } rs
+    ac' r = (ahaCount r) +1 -- reporter's count
+    to' r = Map.foldl' (\acc (Reporter _ count) -> acc + count) 0 (rs' r) -- total count
+    rs = reporters bi
     bi = unBoard b
 
 
 reporterAhaCount :: Board -> ReporterKey -> Either String Int
-reporterAhaCount b rk = Right $ ahaCount reporter
-  where
-    reporter = case Map.lookup rk (reporters bi) of
-      Just r -> r
-      Nothing -> error "invalid reporter key"
-    bi = unBoard b
+reporterAhaCount b rk = case Map.lookup rk (reporters $ unBoard b) of
+  Nothing -> Left "invalid reporter key"
+  Just r -> Right $ ahaCount r
 
 
 boardAhaCount :: Board -> Int
