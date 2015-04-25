@@ -30,11 +30,11 @@ new = ServerState $ ServerStateImp Map.empty Map.empty
 addBoard :: ServerState -> BoardSecretKey -> BoardPublicKey -> MVar Board.Board -> ServerState
 addBoard ss bsk bpk vb = ServerState $ ServerStateImp secrets' boards'
   where
-    secrets' = Map.insert bsk bpk (secrets ssi)
-    boards' = Map.insert bpk vb (boards ssi)
+    secrets' = Map.insert bsk bpk (secrets ssi) -- [TODO] duplication check
+    boards' = Map.insert bpk vb (boards ssi) -- [TODO] duplication check    
     ssi = unServerState ss
 
-    
+
 boardFromPublicKey :: ServerState -> BoardPublicKey -> Maybe (MVar Board.Board)
 boardFromPublicKey ss bpk = Map.lookup bpk (boards $ unServerState ss)
 

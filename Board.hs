@@ -13,13 +13,13 @@ module Board (
   reset,
   aha,
   reporterAhaCount,
-  boardAhaCount,
+  totalAhaCount,
   ) where
 
 import qualified Network.WebSockets as WS
 import qualified Data.Map.Strict as Map
 import Data.Maybe(catMaybes)
-import Data.Either(Either(Right,Left))
+
 
 type ReporterKey = String
 
@@ -120,6 +120,6 @@ reporterAhaCount b rk = case Map.lookup rk (reporters $ unBoard b) of
   Just r -> Right $ ahaCount r
 
 
-boardAhaCount :: Board -> Int
-boardAhaCount b = Map.foldl' (\acc (Reporter _ count) -> acc + count) 0 (reporters $ unBoard b)
+totalAhaCount :: Board -> Int
+totalAhaCount b = Map.foldl' (\acc (Reporter _ count) -> acc + count) 0 (reporters $ unBoard b)
 
