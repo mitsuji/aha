@@ -19,21 +19,61 @@ $(document).ready(function () {
 
 	var bk = url.substr( posQuery +1 );
 	console.log(cookieUtil.cookie('rk:' + bk));
-	//
-	// Cookie に当該のboardのセッションIDがあればURLに渡してレジューム
-	//
-	var url;
+	
 	if(cookieUtil.cookie('rk:' + bk) == null) {
-	    url = '/reporter?bk=' + bk
+	    startNewReporter(bk);
 	} else {
-	    url = '/reporter?bk=' + bk + "&rk=" + cookieUtil.cookie('rk:' + bk);
+	    startExistingReporter(bk);
 	}
+	
+    }
+
+
+    function startNewReporter(bk) {
+	$.post(
+	    'http://' + window.location.host + '/addReporter',
+	    {bpk: bk},
+	    function (data){
+		cookieUtil.setCookie('rk:' + data.bpk ,data.rsk);
+		startWebsocket(data);
+	    },
+	    "json"
+	);
+    }
+    
+
+    function startExistingReporter(bk) {
+	$.post(
+	    'http://' + window.location.host + '/getReporter',
+	    {bpk:bk, rsk: cookieUtil.cookie('rk:' + bk)},
+	    function (data){
+		cookieUtil.setCookie('rk:' + data.bpk, data.rsk);
+		startWebsocket(data);
+	    },
+	    "json"
+	).fail(function(){
+	    startNewReporter(bk);
+	});
+    }
+
+    
+    function startWebsocket( data ) {
+	console.log(data);
+
+	//
+	// 初期表示
+	//
+	
+	// pk
+	// caption
+	// total
+	$('#ahaCount').text(data.ahaCount);
 
 
 	//
 	// WebSocketクライアントの実装
 	//
-	var ws = webSocketUtil.webSocket(url);
+	var ws = webSocketUtil.webSocket('/reporter?bk=' + data.bpk + "&rk=" + data.rsk);
 	
 	ws.onopen = function() {
 	    setConnect(true);
@@ -46,9 +86,7 @@ $(document).ready(function () {
 	ws.onmessage = function(event) {
 	    console.log('onmessage: ' + event.data );
 	    eval (" var json = " + event.data + ";" ); // [TODO] must be danger
-	    if(json.type == 'rk') {
-		cookieUtil.setCookie('rk:' + bk, json.content);
-	    } else if(json.type == 'ahaCount') {
+	    if(json.type == 'ahaCount') {
 		$('#ahaCount').text(json.content);
 	    } else if(json.type == 'reset') {
 		$('#ahaCount').text(0);
@@ -63,9 +101,13 @@ $(document).ready(function () {
             ws.send('aha');
 	},false);
 	
+//	$('#aha').click(function(e){
+//            ws.send('aha');
+//	});
+
     }
 
-
+    
     //
     // 接続表示
     //

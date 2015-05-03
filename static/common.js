@@ -10,7 +10,7 @@ var cookieUtil = function() {
 	    if( keyStart != -1 ) {
 		var valStart = keyStart + key.length + 1; 
 		var valEnd   = document.cookie.indexOf( ';', valStart );
-		if( valEnd = -1 ) {
+		if( valEnd == -1 ) {
 		    valEnd = document.cookie.length;
 		}
 		return document.cookie.substring(valStart,valEnd);
