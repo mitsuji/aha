@@ -1,7 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Board (
+  Caption,
   ReporterKey,
   Board,
+  Error,
   new,
   caption,
   connection,
@@ -16,19 +18,21 @@ module Board (
   aha,
   reporterAhaCount,
   totalAhaCount,
-  dump,
   ) where
 
 import qualified Network.WebSockets as WS
 import qualified Data.Map.Strict as Map
 import Data.Maybe(catMaybes)
-import Data.Aeson.Types
-import Data.Aeson.Encode(encode)
-import qualified Data.ByteString.Lazy.Char8 as LBS -- use for output
+
+import Data.Aeson.Types(ToJSON,FromJSON,Value(Object),toJSON,parseJSON,object,(.=),(.:))
+import Data.Functor ((<$>))
+import Control.Applicative (pure,(<*>))
+import Control.Monad(mzero)
 
 
 
 
+type Caption = String
 type ReporterKey = String
 
 data Reporter = Reporter {
@@ -37,12 +41,16 @@ data Reporter = Reporter {
   }
                 
 data BoardImp = BoardImp {
-  bcaption :: String,
+  bcaption :: Caption,
   bconn :: Maybe WS.Connection,
   reporters :: Map.Map ReporterKey Reporter
   }
 
 newtype Board = Board { unBoard :: BoardImp }
+
+data Error = ActiveConnectionExists
+           | ReporterNotFound
+           deriving(Show)
 
 
 
@@ -51,7 +59,7 @@ new :: String -> Board
 new capt = Board $ BoardImp capt Nothing Map.empty
 
 
-caption :: Board -> String
+caption :: Board -> Caption
 caption b = bcaption $ unBoard b 
 
 
@@ -59,9 +67,9 @@ connection :: Board -> Maybe WS.Connection
 connection b = bconn $ unBoard b
 
 
-setConnection :: Board -> WS.Connection -> Either String Board
+setConnection :: Board -> WS.Connection -> Either Error Board
 setConnection b conn = case bconn bi of
-  Just _ -> Left "active session"
+  Just _ -> Left ActiveConnectionExists
   Nothing -> Right $ Board $ bi { bconn = Just conn } 
   where
     bi = unBoard b
@@ -89,11 +97,11 @@ reporterConnections b = catMaybes
                         $ Map.elems (reporters $ unBoard b)
 
 
-setReporterConnection :: Board -> ReporterKey -> WS.Connection -> Either String Board
+setReporterConnection :: Board -> ReporterKey -> WS.Connection -> Either Error Board
 setReporterConnection b rk conn = case Map.lookup rk rs of
-  Nothing -> Left "invalid reporter key"
+  Nothing -> Left ReporterNotFound
   Just r -> case rconn r of
-    Just _ -> Left "active session"
+    Just _ -> Left ActiveConnectionExists
     Nothing -> Right $ Board $ bi { reporters = rs' r }
   where
     rs' r = Map.insert rk (r { rconn = Just conn }) rs
@@ -101,9 +109,9 @@ setReporterConnection b rk conn = case Map.lookup rk rs of
     bi = unBoard b
 
 
-closeReporterConnection :: Board -> ReporterKey -> Either String Board
+closeReporterConnection :: Board -> ReporterKey -> Either Error Board
 closeReporterConnection b rk = case Map.lookup rk rs of
-  Nothing -> Left "invalid reporter key"
+  Nothing -> Left ReporterNotFound
   Just r -> Right $ Board $ bi { reporters = rs' r }
   where
     rs' r = Map.insert rk (r { rconn = Nothing }) rs
@@ -118,9 +126,9 @@ reset b = Board $ bi { reporters = rs' }
     bi = unBoard b
 
 
-aha :: Board -> ReporterKey -> Either String (Board, Int)
+aha :: Board -> ReporterKey -> Either Error (Board, Int)
 aha b rk = case Map.lookup rk rs of
-  Nothing -> Left "invalid reporter key"
+  Nothing -> Left ReporterNotFound
   Just r -> Right $ (Board $ bi { reporters = rs' r }, ac' r)
   where
     rs' r = Map.insert rk r { ahaCount = ac' r } rs
@@ -143,16 +151,29 @@ totalAhaCount b = Map.foldl' (\acc (Reporter _ count) -> acc + count) 0 (reporte
 
 instance ToJSON Reporter where
   toJSON (Reporter _ ahaCount) =
-    object [ "ahaCount"   .= ahaCount ]
+    object ["ahaCount" .= ahaCount]
+
+instance FromJSON Reporter where
+  parseJSON (Object v) = Reporter <$> (pure Nothing) <*> v .: "ahaCount"
+  parseJSON _ = mzero
+
 
 instance ToJSON BoardImp where
   toJSON (BoardImp caption _ reporters) =
-    object [ "caption"   .= caption,
-             "reporters" .= reporters
+    object ["caption"   .= caption
+           ,"reporters" .= reporters
            ]
-
-dump :: Board -> LBS.ByteString
-dump b = encode bi
-  where
-    bi = unBoard b
     
+instance FromJSON BoardImp where
+  parseJSON (Object v) = BoardImp <$> v .: "caption" <*> (pure Nothing) <*> v .: "reporters"
+  parseJSON _ = mzero
+    
+
+instance ToJSON Board where
+  toJSON (Board bi) = toJSON bi
+
+instance FromJSON Board where
+  parseJSON o = Board <$> parseJSON o
+
+
+

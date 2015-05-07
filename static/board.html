@@ -2,15 +2,23 @@
   <head>
     <meta content="text/html" charset="UTF-8"/> 
     <title>AHA :: Board</title>
-    <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.9.0/jquery.min.js"></script>
+    <!-- script src="http://ajax.googleapis.com/ajax/libs/jquery/1.9.0/jquery.min.js"></script -->
+    <link rel="stylesheet" href="http://code.jquery.com/ui/1.11.4/themes/smoothness/jquery-ui.css">
+    <script src="http://code.jquery.com/jquery-1.10.2.js"></script>
+    <script src="http://code.jquery.com/ui/1.11.4/jquery-ui.js"></script>
     <script type="text/javascript" src="common.js"></script>
     <script type="text/javascript" src="board.js"></script>
+    <style type="text/css">
+      fieldset { padding:0; border:0; margin-top:25px; }
+      label, input { display:block; }
+      input.text { margin-bottom:12px; width:95%; padding: .4em; }
+    </style>
   </head>
   <body>
     <form>
       <div id="connectionStatus">
-	<div style="background-color:green;" class="ok">接続OK</div>
-	<div style="background-color:red;" class="ng">接続NG(リロードしてください)</div>
+	<div style="background-color:green;" class="ok">connection OK</div>
+	<div style="background-color:red;" class="ng">connection NG(please reload)</div>
       </div>
       <div id="slaveAddress"></div>
       <div style="float:left;">
@@ -21,5 +29,23 @@
       </div>
       <div id="total" style="font-size:640px;"></div>
     </form>
+
+
+    <div id="dialog-form" title="create new board">
+      <p class="validateTips">All form fields are required.</p>
+ 
+      <form>
+	<fieldset>
+	  <label for="name">publicKey</label>
+	  <input type="text" name="publicKey" id="publicKey" value="" class="text ui-widget-content ui-corner-all">
+	  <label for="caption">caption</label>
+	  <input type="text" name="caption" id="caption" value="" class="text ui-widget-content ui-corner-all">
+	  
+	  <!-- Allow form submission with keyboard without duplicating the dialog button -->
+	  <input type="submit" tabindex="-1" style="position:absolute; top:-1000px">
+	</fieldset>
+      </form>
+    </div>
+    
   </body>
 </html>

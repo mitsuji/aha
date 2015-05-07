@@ -18,9 +18,9 @@ $(document).ready(function () {
     if( posQuery >= 0 ) {
 
 	var bk = url.substr( posQuery +1 );
-	console.log(cookieUtil.cookie('rk:' + bk));
+	console.log('localStorage:rk: ' + localStorage.getItem('rk:' + bk));
 	
-	if(cookieUtil.cookie('rk:' + bk) == null) {
+	if(localStorage.getItem('rk:' + bk) == null) {
 	    startNewReporter(bk);
 	} else {
 	    startExistingReporter(bk);
@@ -34,8 +34,12 @@ $(document).ready(function () {
 	    'http://' + window.location.host + '/addReporter',
 	    {bpk: bk},
 	    function (data){
-		cookieUtil.setCookie('rk:' + data.bpk ,data.rsk);
-		startWebsocket(data);
+		if(data.success) {
+		    localStorage.setItem('rk:' + data.content.bpk, data.content.rsk)
+		    startWebsocket(data);
+		} else {
+		    alert("error:" + data.error_code + ":" + data.message);  // board　が存在しないなど
+		}
 	    },
 	    "json"
 	);
@@ -45,15 +49,17 @@ $(document).ready(function () {
     function startExistingReporter(bk) {
 	$.post(
 	    'http://' + window.location.host + '/getReporter',
-	    {bpk:bk, rsk: cookieUtil.cookie('rk:' + bk)},
+	    {bpk:bk, rsk: localStorage.getItem('rk:' + bk)},
 	    function (data){
-		cookieUtil.setCookie('rk:' + data.bpk, data.rsk);
-		startWebsocket(data);
+		if(data.success) {
+		    localStorage.setItem('rk:' + data.content.bpk, data.content.rsk)
+		    startWebsocket(data);
+		} else {
+		    startNewReporter(bk);
+		}
 	    },
 	    "json"
-	).fail(function(){
-	    startNewReporter(bk);
-	});
+	);
     }
 
     
@@ -67,13 +73,13 @@ $(document).ready(function () {
 	// pk
 	// caption
 	// total
-	$('#ahaCount').text(data.ahaCount);
+	$('#ahaCount').text(data.content.ahaCount);
 
 
 	//
 	// WebSocketクライアントの実装
 	//
-	var ws = webSocketUtil.webSocket('/reporter?bk=' + data.bpk + "&rk=" + data.rsk);
+	var ws = webSocketUtil.webSocket('/reporter?bk=' + data.content.bpk + "&rk=" + data.content.rsk);
 	
 	ws.onopen = function() {
 	    setConnect(true);

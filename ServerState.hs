@@ -1,17 +1,30 @@
+{-# LANGUAGE OverloadedStrings #-}
 module ServerState (
   BoardSecretKey,
   BoardPublicKey,
   ServerState,
+  Error,
   new,
   addBoard,
   boardFromPublicKey,
   publicKeyFromSecretKey,
+  Item,
   dump,
+  restore,
   ) where
 
 import qualified Data.Map.Strict as Map
-import Control.Concurrent (MVar)
+import Control.Concurrent (MVar,newMVar,readMVar)
+
+import Data.Aeson.Types(ToJSON,FromJSON,Value(Object),toJSON,parseJSON,object,(.=),(.:))
+import Data.Functor ((<$>))
+import Control.Applicative ((<*>))
+import Control.Monad(mzero)
 import Data.Maybe(fromJust)
+
+import Control.Monad(forM,foldM)
+import Control.Exception(throwIO)
+import System.IO.Error(userError)
 
 import qualified Board as Board
 
@@ -28,22 +41,27 @@ data ServerStateImp = ServerStateImp {
 
 newtype ServerState = ServerState { unServerState :: ServerStateImp }
 
+data Error = BoardSecretKeyDuplicated
+           | BoardPublicKeyDuplicated
+           deriving(Show)
+
 
 
 
 new :: ServerState
 new = ServerState $ ServerStateImp Map.empty Map.empty
 
-addBoard :: ServerState -> BoardSecretKey -> BoardPublicKey -> MVar Board.Board -> Either String ServerState
-addBoard ss bsk bpk vb =
-  case Map.member bsk srs of -- duplication check
-    True -> Left "BaordSecretKey duplicated"
-    False -> case Map.member bpk bds of -- duplication check
-      True -> Left "BoardPublicKey duplicated"
+
+addBoard :: ServerState -> BoardSecretKey -> BoardPublicKey -> MVar Board.Board -> Either Error ServerState
+addBoard ss bsk bpk vboard =
+  case Map.member bsk srs of
+    True -> Left BoardSecretKeyDuplicated
+    False -> case Map.member bpk bds of
+      True -> Left BoardPublicKeyDuplicated
       False ->  Right $ ServerState $ ServerStateImp srs' bds'
   where
     srs' = Map.insert bsk bpk srs
-    bds' = Map.insert bpk vb bds
+    bds' = Map.insert bpk vboard bds
     srs = secrets ssi
     bds = boards ssi
     ssi = unServerState ss
@@ -59,9 +77,37 @@ publicKeyFromSecretKey ss bsk = Map.lookup bsk (secrets $ unServerState ss)
 
 
 
-dump :: ServerState -> [(BoardSecretKey, BoardPublicKey, MVar Board.Board)]
-dump ss = map ( \(sk, pk) -> (sk, pk, fromJust $ Map.lookup pk bds ) ) $ Map.toList srs
+data Item = Item BoardSecretKey BoardPublicKey Board.Board
+
+instance ToJSON Item where
+  toJSON (Item bsk bpk b) =
+    object ["bsk"   .= bsk
+           ,"bpk"   .= bpk
+           ,"board" .= b
+           ]
+
+instance FromJSON Item where
+  parseJSON (Object v) = Item <$> v .: "bsk" <*> v .: "bpk" <*> v.: "board"
+  parseJSON _ = mzero
+
+
+dump :: ServerState -> IO [Item]
+dump ss = forM srs $ \(sk, pk) -> do
+  board <- readMVar $ fromJust $ Map.lookup pk bds
+  return $ Item sk pk board
   where
-    srs = secrets ssi
+    srs = Map.toList $ secrets ssi
     bds = boards ssi
     ssi = unServerState ss
+
+
+restore :: [Item] -> IO ServerState
+restore items = foldM restore' ServerState.new items
+  where
+    restore' :: ServerState -> Item -> IO ServerState
+    restore' state (Item bsk bpk board) = do
+      vboard <- newMVar board
+      case addBoard state bsk bpk vboard of
+        Left err -> throwIO $ userError $ show err
+        Right state' -> return state'
+

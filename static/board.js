@@ -9,9 +9,9 @@ $(document).ready(function () {
     setConnect(false);
     $('#total').text('0');
     
-    console.log('cookie:bk: ' + cookieUtil.cookie('bk'));
+    console.log('localStorage:bk: ' + localStorage.getItem('bk'));
 
-    if(cookieUtil.cookie('bk') == null) {
+    if(localStorage.getItem('bk') == null) {
 	startNewBoard();
     } else {
 	startExistingBoard();
@@ -23,8 +23,12 @@ $(document).ready(function () {
 	    'http://' + window.location.host + '/addBoard',
 	    {pk:"mitsujitest1",caption:"mitsuji test1"},
 	    function (data){
-		cookieUtil.setCookie('bk',data.sk);
-		startWebsocket(data);
+		if(data.success) {
+		    localStorage.setItem('bk',data.content.sk);
+		    startWebsocket(data);
+		} else {
+		    alert("error:" + data.error_code + ":" + data.message); // publicKey の重複など
+		}
 	    },
 	    "json"
 	);
@@ -34,15 +38,17 @@ $(document).ready(function () {
     function startExistingBoard() {
 	$.post(
 	    'http://' + window.location.host + '/getBoard',
-	    {sk: cookieUtil.cookie('bk')},
+	    {sk: localStorage.getItem('bk')},
 	    function (data){
-		cookieUtil.setCookie('bk',data.sk);
-		startWebsocket(data);
+		if(data.success) {
+		    localStorage.setItem('bk',data.content.sk);
+		    startWebsocket(data);
+		} else {
+		    startNewBoard();
+		}
 	    },
 	    "json"
-	).fail(function(){
-	    startNewBoard();
-	});
+	);
     }
     
 
@@ -52,7 +58,7 @@ $(document).ready(function () {
 	//
 	// 初期表示
 	//
-	var slave_url = 'http://' + window.location.host + '/reporter.html?' + data.pk ;
+	var slave_url = 'http://' + window.location.host + '/reporter.html?' + data.content.pk ;
 	var qr_url = 'https://chart.googleapis.com/chart';
 	qr_url += '?chs=300x300&cht=qr&chl=' + slave_url;
 	$('#slaveAddress').text(slave_url);
@@ -60,13 +66,13 @@ $(document).ready(function () {
 
 	// pk
 	// caption
-	$('#total').text(data.total);
+	$('#total').text(data.content.total);
 	
 
 	//
 	// WebSocketクライアントの実装
 	//
-	var ws = webSocketUtil.webSocket('/board?bk=' + data.sk);
+	var ws = webSocketUtil.webSocket('/board?bk=' + data.content.sk);
 	
 	ws.onopen = function() {
 	    setConnect(true);
@@ -109,6 +115,36 @@ $(document).ready(function () {
 	}
     }
 
+
+    var dialog, form;
+    
+    dialog = $( "#dialog-form" ).dialog({
+      autoOpen: false,
+      height: 400,
+      width: 400,
+      modal: true,
+      buttons: {
+        "Create a board": function(){ console.log("go!!")},
+        Cancel: function() {
+          dialog.dialog( "close" );
+        }
+      },
+      close: function() {
+        form[ 0 ].reset();
+        allFields.removeClass( "ui-state-error" );
+      }
+    });
+ 
+    form = dialog.find( "form" ).on( "submit", function( event ) {
+      event.preventDefault();
+	console.log("go!!");
+    });
+ 
+    $( "#create-user" ).button().on( "click", function() {
+      dialog.dialog( "open" );
+    });
+    
+//    dialog.dialog( "open" );
     
 });
 
