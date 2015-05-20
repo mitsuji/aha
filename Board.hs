@@ -1,11 +1,15 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Board (
+  Caption,
   ReporterKey,
   Board,
+  Error,
   new,
+  caption,
   connection,
   setConnection,
   closeConnection,
-  reporter,
+  hasReporter,
   addReporter,
   reporterConnections,
   setReporterConnection,
@@ -20,7 +24,15 @@ import qualified Network.WebSockets as WS
 import qualified Data.Map.Strict as Map
 import Data.Maybe(catMaybes)
 
+import Data.Aeson.Types(ToJSON,FromJSON,Value(Object),toJSON,parseJSON,object,(.=),(.:))
+import Data.Functor ((<$>))
+import Control.Applicative (pure,(<*>))
+import Control.Monad(mzero)
 
+
+
+
+type Caption = String
 type ReporterKey = String
 
 data Reporter = Reporter {
@@ -29,24 +41,35 @@ data Reporter = Reporter {
   }
                 
 data BoardImp = BoardImp {
+  bcaption :: Caption,
   bconn :: Maybe WS.Connection,
   reporters :: Map.Map ReporterKey Reporter
   }
 
 newtype Board = Board { unBoard :: BoardImp }
 
+data Error = ActiveConnectionExists
+           | ReporterNotFound
+           deriving(Show)
 
-new :: WS.Connection -> Board
-new conn = Board $ BoardImp (Just conn) Map.empty
+
+
+
+new :: String -> Board
+new capt = Board $ BoardImp capt Nothing Map.empty
+
+
+caption :: Board -> Caption
+caption b = bcaption $ unBoard b 
 
 
 connection :: Board -> Maybe WS.Connection
 connection b = bconn $ unBoard b
 
 
-setConnection :: Board -> WS.Connection -> Either String Board
+setConnection :: Board -> WS.Connection -> Either Error Board
 setConnection b conn = case bconn bi of
-  Just _ -> Left "active session"
+  Just _ -> Left ActiveConnectionExists
   Nothing -> Right $ Board $ bi { bconn = Just conn } 
   where
     bi = unBoard b
@@ -56,16 +79,17 @@ closeConnection :: Board -> Board
 closeConnection b = Board $ (unBoard b) { bconn = Nothing } 
 
 
-reporter :: Board -> ReporterKey -> Bool
-reporter b rk = Map.member rk (reporters $ unBoard b)
+hasReporter :: Board -> ReporterKey -> Bool
+hasReporter b rk = Map.member rk $ reporters $ unBoard b
 
-addReporter :: Board -> ReporterKey -> WS.Connection -> Board
-addReporter b rk conn = Board $ bi { reporters = rs' }
+
+addReporter :: Board -> ReporterKey -> Board
+addReporter b rk = Board $ bi { reporters = rs' }
   where
     rs' = Map.insert rk r' (reporters bi)
-    r' = Reporter (Just conn) 0
+    r' = Reporter Nothing 0
     bi = unBoard b
-    
+
 
 reporterConnections :: Board -> [WS.Connection]
 reporterConnections b = catMaybes
@@ -73,11 +97,11 @@ reporterConnections b = catMaybes
                         $ Map.elems (reporters $ unBoard b)
 
 
-setReporterConnection :: Board -> ReporterKey -> WS.Connection -> Either String Board
+setReporterConnection :: Board -> ReporterKey -> WS.Connection -> Either Error Board
 setReporterConnection b rk conn = case Map.lookup rk rs of
-  Nothing -> Left "invalid reporter key"
+  Nothing -> Left ReporterNotFound
   Just r -> case rconn r of
-    Just _ -> Left "active session"
+    Just _ -> Left ActiveConnectionExists
     Nothing -> Right $ Board $ bi { reporters = rs' r }
   where
     rs' r = Map.insert rk (r { rconn = Just conn }) rs
@@ -85,9 +109,9 @@ setReporterConnection b rk conn = case Map.lookup rk rs of
     bi = unBoard b
 
 
-closeReporterConnection :: Board -> ReporterKey -> Either String Board
+closeReporterConnection :: Board -> ReporterKey -> Either Error Board
 closeReporterConnection b rk = case Map.lookup rk rs of
-  Nothing -> Left "invalid reporter key"
+  Nothing -> Left ReporterNotFound
   Just r -> Right $ Board $ bi { reporters = rs' r }
   where
     rs' r = Map.insert rk (r { rconn = Nothing }) rs
@@ -102,24 +126,54 @@ reset b = Board $ bi { reporters = rs' }
     bi = unBoard b
 
 
-aha :: Board -> ReporterKey -> Either String (Board, Int, Int)
+aha :: Board -> ReporterKey -> Either Error (Board, Int)
 aha b rk = case Map.lookup rk rs of
-  Nothing -> Left "invalid reporter key"
-  Just r -> Right $ (Board $ bi { reporters = rs' r }, ac' r, to' r)
+  Nothing -> Left ReporterNotFound
+  Just r -> Right $ (Board $ bi { reporters = rs' r }, ac' r)
   where
     rs' r = Map.insert rk r { ahaCount = ac' r } rs
     ac' r = (ahaCount r) +1 -- reporter's count
-    to' r = Map.foldl' (\acc (Reporter _ count) -> acc + count) 0 (rs' r) -- total count
     rs = reporters bi
     bi = unBoard b
 
 
-reporterAhaCount :: Board -> ReporterKey -> Either String Int
+reporterAhaCount :: Board -> ReporterKey -> Maybe Int
 reporterAhaCount b rk = case Map.lookup rk (reporters $ unBoard b) of
-  Nothing -> Left "invalid reporter key"
-  Just r -> Right $ ahaCount r
+  Nothing -> Nothing
+  Just r -> Just $ ahaCount r
 
 
 totalAhaCount :: Board -> Int
 totalAhaCount b = Map.foldl' (\acc (Reporter _ count) -> acc + count) 0 (reporters $ unBoard b)
+
+
+
+
+instance ToJSON Reporter where
+  toJSON (Reporter _ ahaCount) =
+    object ["ahaCount" .= ahaCount]
+
+instance FromJSON Reporter where
+  parseJSON (Object v) = Reporter <$> (pure Nothing) <*> v .: "ahaCount"
+  parseJSON _ = mzero
+
+
+instance ToJSON BoardImp where
+  toJSON (BoardImp caption _ reporters) =
+    object ["caption"   .= caption
+           ,"reporters" .= reporters
+           ]
+    
+instance FromJSON BoardImp where
+  parseJSON (Object v) = BoardImp <$> v .: "caption" <*> (pure Nothing) <*> v .: "reporters"
+  parseJSON _ = mzero
+    
+
+instance ToJSON Board where
+  toJSON (Board bi) = toJSON bi
+
+instance FromJSON Board where
+  parseJSON o = Board <$> parseJSON o
+
+
 

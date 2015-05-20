@@ -18,22 +18,68 @@ $(document).ready(function () {
     if( posQuery >= 0 ) {
 
 	var bk = url.substr( posQuery +1 );
-	console.log(cookieUtil.cookie('rk:' + bk));
-	//
-	// Cookie に当該のboardのセッションIDがあればURLに渡してレジューム
-	//
-	var url;
-	if(cookieUtil.cookie('rk:' + bk) == null) {
-	    url = '/reporter?bk=' + bk
+	console.log('localStorage:rk: ' + localStorage.getItem('rk:' + bk));
+	
+	if(localStorage.getItem('rk:' + bk) == null) {
+	    startNewReporter(bk);
 	} else {
-	    url = '/reporter?bk=' + bk + "&rk=" + cookieUtil.cookie('rk:' + bk);
+	    startExistingReporter(bk);
 	}
+	
+    }
+
+
+    function startNewReporter(bk) {
+	$.post(
+	    'http://' + window.location.host + '/addReporter',
+	    {bpk: bk},
+	    function (data){
+		if(data.success) {
+		    localStorage.setItem('rk:' + data.content.bpk, data.content.rsk)
+		    startWebsocket(data);
+		} else {
+		    alert("error:" + data.error_code + ":" + data.message);  // board　が存在しないなど
+		}
+	    },
+	    "json"
+	);
+    }
+    
+
+    function startExistingReporter(bk) {
+	$.post(
+	    'http://' + window.location.host + '/getReporter',
+	    {bpk:bk, rsk: localStorage.getItem('rk:' + bk)},
+	    function (data){
+		if(data.success) {
+		    localStorage.setItem('rk:' + data.content.bpk, data.content.rsk)
+		    startWebsocket(data);
+		} else {
+		    startNewReporter(bk);
+		}
+	    },
+	    "json"
+	);
+    }
+
+    
+    function startWebsocket( data ) {
+	console.log(data);
+
+	//
+	// 初期表示
+	//
+	
+	// pk
+	// caption
+	// total
+	$('#ahaCount').text(data.content.ahaCount);
 
 
 	//
 	// WebSocketクライアントの実装
 	//
-	var ws = webSocketUtil.webSocket(url);
+	var ws = webSocketUtil.webSocket('/reporter?bk=' + data.content.bpk + "&rk=" + data.content.rsk);
 	
 	ws.onopen = function() {
 	    setConnect(true);
@@ -46,9 +92,7 @@ $(document).ready(function () {
 	ws.onmessage = function(event) {
 	    console.log('onmessage: ' + event.data );
 	    eval (" var json = " + event.data + ";" ); // [TODO] must be danger
-	    if(json.type == 'rk') {
-		cookieUtil.setCookie('rk:' + bk, json.content);
-	    } else if(json.type == 'ahaCount') {
+	    if(json.type == 'ahaCount') {
 		$('#ahaCount').text(json.content);
 	    } else if(json.type == 'reset') {
 		$('#ahaCount').text(0);
@@ -63,9 +107,13 @@ $(document).ready(function () {
             ws.send('aha');
 	},false);
 	
+//	$('#aha').click(function(e){
+//            ws.send('aha');
+//	});
+
     }
 
-
+    
     //
     // 接続表示
     //
