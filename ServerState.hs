@@ -3,7 +3,7 @@ module ServerState (
   BoardSecretKey,
   BoardPublicKey,
   ServerState,
-  Error,
+  Error(..),
   new,
   addBoard,
   boardFromPublicKey,
@@ -43,6 +43,8 @@ newtype ServerState = ServerState { unServerState :: ServerStateImp }
 
 data Error = BoardSecretKeyDuplicated
            | BoardPublicKeyDuplicated
+           | BoardSecretKeyInvalid
+           | BoardPublicKeyInvalid
            deriving(Show)
 
 
@@ -52,6 +54,7 @@ new :: ServerState
 new = ServerState $ ServerStateImp Map.empty Map.empty
 
 
+-- [TODO] Input validation
 addBoard :: ServerState -> BoardSecretKey -> BoardPublicKey -> MVar Board.Board -> Either Error ServerState
 addBoard ss bsk bpk vboard =
   case Map.member bsk srs of
@@ -99,7 +102,6 @@ dump ss = forM srs $ \(sk, pk) -> do
     srs = Map.toList $ secrets ssi
     bds = boards ssi
     ssi = unServerState ss
-
 
 restore :: [Item] -> IO ServerState
 restore items = foldM restore' ServerState.new items
