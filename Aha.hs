@@ -46,7 +46,7 @@ main = do
   Warp.runSettings (
     Warp.setHost ( fromString host ) $
     Warp.setPort ( read port ) $
--- [TODO]    
+-- [TODO] shutdown correctly
 --    Warp.setInstallShutdownHandler ( installShutdownHandler threadBackup ) $
     Warp.defaultSettings
     ) $ websocketsOr WS.defaultConnectionOptions (websocketApp vstate) (webApp vstate)
@@ -54,7 +54,7 @@ main = do
 
 
 
--- [TODO]
+-- [TODO] shutdown correctly
 installShutdownHandler :: ThreadId -> IO() -> IO()
 installShutdownHandler threadBackup close = do
   installHandler sigINT (CatchOnce shutdown) Nothing
@@ -100,12 +100,9 @@ throwError code msg = throwIO $ AhaException code msg
 
 
 
-type AhaCount = Int
-type TotalAhaCount = Int
-
 data Response = ResponseError ErrorCode ErrorMessage
-              | ResponseBoardKeys BoardSecretKey BoardPublicKey Caption TotalAhaCount
-              | ResponseReporterKeys ReporterKey BoardPublicKey Caption AhaCount TotalAhaCount
+              | ResponseBoard BoardSecretKey BoardPublicKey Caption TotalAha
+              | ResponseReporter ReporterKey Aha BoardPublicKey Caption TotalAha
               deriving (Show)
 
 instance ToJSON Response where
@@ -114,33 +111,33 @@ instance ToJSON Response where
            ,"error_code" .= code
            ,"message"    .= msg
            ]
-  toJSON (ResponseBoardKeys bsk bpk cap total) =
+  toJSON (ResponseBoard sk pk c ta) =
     object ["success" .= True
-           ,"type"    .= ("bks" :: String)
-           ,"content" .= object ["sk"      .= bsk
-                                ,"pk"      .= bpk
-                                ,"caption" .= cap
-                                ,"total"   .= total
+           ,"type"    .= ("board" :: String)
+           ,"content" .= object ["secret_key" .= sk
+                                ,"public_key" .= pk
+                                ,"caption"    .= c
+                                ,"total_aha"  .= ta
                                 ]
            ]
-  toJSON (ResponseReporterKeys rsk bpk cap aha total) =
+  toJSON (ResponseReporter rk aha bpk c ta) =
     object ["success" .= True
-           ,"type"    .= ("rsk" :: String)
-           ,"content" .= object ["rsk"      .= rsk
-                                ,"bpk"      .= bpk
-                                ,"ahaCount" .= aha
-                                ,"caption"  .= cap
-                                ,"total"    .= total
+           ,"type"    .= ("reporter" :: String)
+           ,"content" .= object ["reporter_key"     .= rk
+                                ,"aha"              .= aha
+                                ,"board_public_key" .= bpk
+                                ,"board_caption"    .= c
+                                ,"board_total_aha"  .= ta
                                 ]
            ]
 
 
 webApp :: MVar ServerState -> Wai.Application
 webApp vstate req respond
-  | ["addBoard"]    == path = catch (addBoardProc    vstate req respond) onError
-  | ["getBoard"]    == path = catch (getBoardProc    vstate req respond) onError
-  | ["addReporter"] == path = catch (addReporterProc vstate req respond) onError
-  | ["getReporter"] == path = catch (getReporterProc vstate req respond) onError
+  | ["add_board"]    == path = catch (addBoardProc    vstate req respond) onError
+  | ["get_board"]    == path = catch (getBoardProc    vstate req respond) onError
+  | ["add_reporter"] == path = catch (addReporterProc vstate req respond) onError
+  | ["get_reporter"] == path = catch (getReporterProc vstate req respond) onError
   | otherwise = staticApp req respond -- static html/js/css files
   where
     path = Wai.pathInfo req
@@ -197,7 +194,7 @@ addBoardProc vstate req respond = do
   respond $ Wai.responseLBS
     H.status200
     [contentTypeJsonHeader]
-    ( AE.encode $ ResponseBoardKeys sk pk caption 0 )
+    ( AE.encode $ ResponseBoard sk pk caption 0 )
 
 
 getBoardProc :: MVar ServerState -> Wai.Application
@@ -218,7 +215,7 @@ getBoardProc vstate req respond = do
   respond $ Wai.responseLBS
     H.status200
     [contentTypeJsonHeader]
-    ( AE.encode $ ResponseBoardKeys sk pk (caption board) (aha board) )
+    ( AE.encode $ ResponseBoard sk pk (caption board) (aha board) )
 
 
 
@@ -249,7 +246,7 @@ addReporterProc vstate req respond = do
   respond $ Wai.responseLBS
     H.status200
     [contentTypeJsonHeader]
-    ( AE.encode $ ResponseReporterKeys rsk bpk (caption board) 0 (aha board) )
+    ( AE.encode $ ResponseReporter rsk 0 bpk (caption board) (aha board) )
   
     
 getReporterProc :: MVar ServerState -> Wai.Application
@@ -281,29 +278,31 @@ getReporterProc vstate req respond = do
   respond $ Wai.responseLBS
     H.status200
     [contentTypeJsonHeader]
-    ( AE.encode $ ResponseReporterKeys rsk bpk (caption board) raha (aha board) )
+    ( AE.encode $ ResponseReporter rsk raha bpk (caption board) (aha board) )
 
 
 
 
 data Message = MessageReset
-             | MessageAhaCount AhaCount
-             | MessageTotalAhaCount TotalAhaCount
+             | MessageAha Aha
+             | MessageTotalAha TotalAha
              deriving (Show)
                        
 instance ToJSON Message where
   toJSON (MessageReset) =
     object ["type" .= ("reset" :: String)]
-  toJSON (MessageAhaCount count) =
-    object ["type"    .= ("ahaCount" :: String)
-           ,"content" .= count
+  toJSON (MessageAha aha) =
+    object ["type"    .= ("aha" :: String)
+           ,"content" .= aha
            ]
-  toJSON (MessageTotalAhaCount count) =
-    object ["type"    .= ("total" :: String)
-           ,"content" .= count
+  toJSON (MessageTotalAha ta) =
+    object ["type"    .= ("total_aha" :: String)
+           ,"content" .= ta
            ]
 
 
+-- [TODO] response error
+-- [TODO] websocket error
 websocketApp :: MVar ServerState -> WS.ServerApp
 websocketApp state pconn
   | "/board"    == path = boardServer state pconn
@@ -354,7 +353,7 @@ boardLoop conn vboard = forever $ do
     let board' = reset board
     return (board',board')
 
-  mapM_ (\rconn-> WS.sendTextData rconn $ AE.encode MessageReset) $ reporterConnections board 
+  mapM_ (\rconn-> WS.sendTextData rconn $ AE.encode MessageReset) (reporterConnections board) 
   WS.sendTextData conn $ AE.encode MessageReset
   
     
@@ -408,14 +407,15 @@ reporterLoop :: WS.Connection -> MVar Board -> ReporterKey -> IO ()
 reporterLoop conn vboard reporterSecretKey = forever $ do
   msg <- WS.receiveData conn :: IO BS.ByteString
   
-  (board, ahaCount) <- modifyMVar vboard $ \board ->
+  (board, aha, ta) <- modifyMVar vboard $ \board ->
     case incrementReporterAha board reporterSecretKey of
       Left err -> throwError 20008 ("Board.incrementReporterAha failed: " ++ (show err))
-      Right result@(board', _) -> return (board', result)
+      Right result@(board', _, _) -> return (board', result)
                               
+  WS.sendTextData conn $ AE.encode $ MessageAha aha
   let bconn = connection board
-  when (isJust bconn) $ WS.sendTextData (fromJust bconn) $ AE.encode $ MessageTotalAhaCount $ aha board
-  WS.sendTextData conn $ AE.encode $ MessageAhaCount ahaCount
+  when (isJust bconn) $ WS.sendTextData (fromJust bconn) $ AE.encode $ MessageTotalAha ta
+  mapM_ (\rconn-> WS.sendTextData rconn $ AE.encode $ MessageTotalAha ta) (reporterConnections board)
 
 
 

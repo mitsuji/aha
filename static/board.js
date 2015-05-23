@@ -7,44 +7,35 @@ $(document).ready(function () {
     // 表示リセット
     //
     setConnect(false);
-    $('#total').text('0');
+    setCaption('');
+    setTotal('0');
     
-    console.log('localStorage:bk: ' + localStorage.getItem('bk'));
+    console.log('localStorage: bk: ' + localStorage.getItem('bk'));
 
-    if(localStorage.getItem('bk') == null) {
-	startNewBoard();
+    if(localStorage.getItem('bk') != null) {
+	resume();
     } else {
-	startExistingBoard();
+	create();
     }
 
     
-    function startNewBoard() {
+    function resume() {
 	$.post(
-	    'http://' + window.location.host + '/addBoard',
-	    {pk:"mitsujitest1",caption:"mitsuji test1"},
-	    function (data){
-		if(data.success) {
-		    localStorage.setItem('bk',data.content.sk);
-		    startWebsocket(data);
-		} else {
-		    alert("error:" + data.error_code + ":" + data.message); // publicKey の重複など
-		}
-	    },
-	    "json"
-	);
-    }
-
-    
-    function startExistingBoard() {
-	$.post(
-	    'http://' + window.location.host + '/getBoard',
+	    'http://' + location.host + '/get_board',
 	    {sk: localStorage.getItem('bk')},
 	    function (data){
 		if(data.success) {
-		    localStorage.setItem('bk',data.content.sk);
-		    startWebsocket(data);
+		    localStorage.setItem('bk',data.content.secret_key);
+		    connect(data.content);
 		} else {
-		    startNewBoard();
+		    switch(data.error_code) {
+		    case 10001:
+			alert("error: " + data.error_code + ": " + data.message);
+			break;
+		    default:
+			create();
+			break;
+		    }
 		}
 	    },
 	    "json"
@@ -52,30 +43,36 @@ $(document).ready(function () {
     }
     
 
-    function startWebsocket( data ) {
-	console.log(data);
+    function create() {
+	$.post(
+	    'http://' + location.host + '/add_board',
+	    {pk: "mitsujitest1", caption: "mitsuji test1"},
+	    function (data){
+		if(data.success) {
+		    localStorage.setItem('bk',data.content.secret_key);
+		    connect(data.content);
+		} else {
+		    alert("error: " + data.error_code + ": " + data.message);
+		}
+	    },
+	    "json"
+	);
+    }
 
-	//
-	// 初期表示
-	//
-	var slave_url = 'http://' + window.location.host + '/reporter.html?' + data.content.pk ;
-	var qr_url = 'https://chart.googleapis.com/chart';
-	qr_url += '?chs=300x300&cht=qr&chl=' + slave_url;
-	$('#slaveAddress').text(slave_url);
-	$('#qr').attr('src',qr_url);
-
-	// pk
-	// caption
-	$('#total').text(data.content.total);
-	
+    
+    function connect( content ) {
+	console.log(content);
 
 	//
 	// WebSocketクライアントの実装
 	//
-	var ws = webSocketUtil.webSocket('/board?bk=' + data.content.sk);
+	var ws = webSocketUtil.webSocket('/board?bk=' + content.secret_key);
 	
 	ws.onopen = function() {
 	    setConnect(true);
+	    setCaption(content.caption);
+	    setTotal(content.total_aha);
+	    setQr(content.public_key);
 	};
 	
 	ws.onclose = function(event) {
@@ -83,15 +80,15 @@ $(document).ready(function () {
 	};
 	
 	ws.onmessage = function(event) {
-	    console.log('onmessage: ' + event.data );
-	    eval (" var json = " + event.data + ";" ); // [TODO] must be danger
-	    if(json.type == 'total') {
-		$('#total').text(json.content);
+	    console.log('onmessage: ' + event.data);
+	    eval ("var json = " + event.data + ";" ); // [TODO] must be danger
+	    if(json.type == 'total_aha') {
+		setTotal(json.content);
 	    } else if(json.type == 'reset') {
-		$('#total').text('0');
+		setTotal('0');
 	    }
 	};
-
+	
 	
 	//
 	// リセットボタン押下
@@ -103,7 +100,7 @@ $(document).ready(function () {
     }
 
     //
-    // 接続表示
+    // 画面表示
     //
     function setConnect( flag ) {
 	if( flag ) {
@@ -115,6 +112,22 @@ $(document).ready(function () {
 	}
     }
 
+    function setCaption( caption ) {
+	$('#caption').text( caption );
+    }
+
+    function setTotal( total ) {
+	$('#total').text( total );
+    }
+
+    function setQr( public_key ) {
+	var reporter_url = 'http://' + location.host + '/reporter.html?' + public_key;
+	var qr_url = 'https://chart.googleapis.com/chart';
+	qr_url += '?chs=300x300&cht=qr&chl=' + reporter_url;
+	$('#reporterAddress').text(reporter_url);
+	$('#qr').attr('src',qr_url);
+    }
+    
 
     var dialog, form;
     
