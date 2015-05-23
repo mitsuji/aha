@@ -3,26 +3,27 @@ module Board (
   Caption,
   ReporterKey,
   Board,
-  Error,
+  Error(..),
   new,
   caption,
   connection,
   setConnection,
   closeConnection,
+  aha,
+  reset,
+  reporterConnections,
   hasReporter,
   addReporter,
-  reporterConnections,
+  reporterConnection,
   setReporterConnection,
   closeReporterConnection,
-  reset,
-  aha,
-  reporterAhaCount,
-  totalAhaCount,
+  reporterAha,
+  incrementReporterAha,
   ) where
 
 import qualified Network.WebSockets as WS
 import qualified Data.Map.Strict as Map
-import Data.Maybe(catMaybes)
+import Data.Maybe(isJust,catMaybes)
 
 import Data.Aeson.Types(ToJSON,FromJSON,Value(Object),toJSON,parseJSON,object,(.=),(.:))
 import Data.Functor ((<$>))
@@ -36,115 +37,123 @@ type Caption = String
 type ReporterKey = String
 
 data Reporter = Reporter {
-  rconn :: Maybe WS.Connection,
-  ahaCount :: Int
+  dReporterConnection :: Maybe WS.Connection,
+  dReporterAha :: Int
   }
                 
 data BoardImp = BoardImp {
-  bcaption :: Caption,
-  bconn :: Maybe WS.Connection,
-  reporters :: Map.Map ReporterKey Reporter
+  dBoardCaption :: Caption,
+  dBoardConnection :: Maybe WS.Connection,
+  dBoardReporters :: Map.Map ReporterKey Reporter
   }
 
 newtype Board = Board { unBoard :: BoardImp }
 
-data Error = ActiveConnectionExists
+data Error = CaptionInvalid
+           | ReporterKeyDuplicated
            | ReporterNotFound
+           | ActiveConnectionExists
            deriving(Show)
 
 
 
-
-new :: String -> Board
-new capt = Board $ BoardImp capt Nothing Map.empty
+-- [TODO] caption validation
+new :: Caption -> Either Error Board
+new c = Right $ Board $ BoardImp c Nothing Map.empty
 
 
 caption :: Board -> Caption
-caption b = bcaption $ unBoard b 
+caption b = dBoardCaption $ unBoard b 
 
 
 connection :: Board -> Maybe WS.Connection
-connection b = bconn $ unBoard b
+connection b = dBoardConnection $ unBoard b
 
 
 setConnection :: Board -> WS.Connection -> Either Error Board
-setConnection b conn = case bconn bi of
-  Just _ -> Left ActiveConnectionExists
-  Nothing -> Right $ Board $ bi { bconn = Just conn } 
-  where
-    bi = unBoard b
+setConnection b conn = case isJust $ connection b of
+  True  -> Left ActiveConnectionExists
+  False -> Right $ Board $ (unBoard b) { dBoardConnection = Just conn } 
 
 
 closeConnection :: Board -> Board
-closeConnection b = Board $ (unBoard b) { bconn = Nothing } 
+closeConnection b = Board $ (unBoard b) { dBoardConnection = Nothing } 
 
 
-hasReporter :: Board -> ReporterKey -> Bool
-hasReporter b rk = Map.member rk $ reporters $ unBoard b
+aha :: Board -> Int
+aha b = Map.foldl' (\acc r -> acc + (dReporterAha r)) 0 (dBoardReporters $ unBoard b)
 
 
-addReporter :: Board -> ReporterKey -> Board
-addReporter b rk = Board $ bi { reporters = rs' }
+reset :: Board -> Board
+reset b = Board $ bi { dBoardReporters = rs' }
   where
-    rs' = Map.insert rk r' (reporters bi)
-    r' = Reporter Nothing 0
+    rs' = Map.map (\r -> r { dReporterAha = 0 }) (dBoardReporters bi)
     bi = unBoard b
 
 
 reporterConnections :: Board -> [WS.Connection]
 reporterConnections b = catMaybes
-                        $ map (\(Reporter rconn _) -> rconn)
-                        $ Map.elems (reporters $ unBoard b)
+                        $ map dReporterConnection $ Map.elems (dBoardReporters $ unBoard b)
 
 
-setReporterConnection :: Board -> ReporterKey -> WS.Connection -> Either Error Board
-setReporterConnection b rk conn = case Map.lookup rk rs of
+
+
+reporter' :: Board -> ReporterKey -> Either Error Reporter
+reporter' b rk = case Map.lookup rk (dBoardReporters $ unBoard b) of
   Nothing -> Left ReporterNotFound
-  Just r -> case rconn r of
-    Just _ -> Left ActiveConnectionExists
-    Nothing -> Right $ Board $ bi { reporters = rs' r }
+  Just r -> Right r
+
+
+insertReporter' :: Board -> ReporterKey -> Reporter -> Board
+insertReporter' b rk r = Board $ bi { dBoardReporters = rs' }
   where
-    rs' r = Map.insert rk (r { rconn = Just conn }) rs
-    rs = reporters bi
+    rs' = Map.insert rk r (dBoardReporters bi)
     bi = unBoard b
+
+
+updateReporter' :: Board -> ReporterKey -> (Reporter -> Reporter) -> Either Error Board
+updateReporter' b rk f = 
+  (\r -> insertReporter' b rk (f r)) <$> reporter' b rk 
+
+
+
+
+hasReporter :: Board -> ReporterKey -> Bool
+hasReporter b rk = Map.member rk (dBoardReporters $ unBoard b)
+
+
+addReporter :: Board -> ReporterKey -> Either Error Board
+addReporter b rk = case hasReporter b rk of
+  True  -> Left ReporterKeyDuplicated
+  False -> Right $ insertReporter' b rk (Reporter Nothing 0)
+
+
+reporterConnection :: Board -> ReporterKey -> Either Error (Maybe WS.Connection)
+reporterConnection b rk = dReporterConnection <$> reporter' b rk
+
+  
+setReporterConnection :: Board -> ReporterKey -> WS.Connection -> Either Error Board
+setReporterConnection b rk conn = do
+  hasConn <- isJust <$> reporterConnection b rk
+  case hasConn of
+    True  -> Left ActiveConnectionExists
+    False -> updateReporter' b rk (\r -> r { dReporterConnection = Just conn })
 
 
 closeReporterConnection :: Board -> ReporterKey -> Either Error Board
-closeReporterConnection b rk = case Map.lookup rk rs of
-  Nothing -> Left ReporterNotFound
-  Just r -> Right $ Board $ bi { reporters = rs' r }
-  where
-    rs' r = Map.insert rk (r { rconn = Nothing }) rs
-    rs = reporters bi
-    bi = unBoard b
+closeReporterConnection b rk =
+  updateReporter' b rk (\r -> r { dReporterConnection = Nothing })
          
 
-reset :: Board -> Board
-reset b = Board $ bi { reporters = rs' }
-  where
-    rs' = Map.map (\r -> r { ahaCount = 0 }) (reporters bi)
-    bi = unBoard b
+reporterAha :: Board -> ReporterKey -> Either Error Int
+reporterAha b rk = dReporterAha <$> reporter' b rk
 
 
-aha :: Board -> ReporterKey -> Either Error (Board, Int)
-aha b rk = case Map.lookup rk rs of
-  Nothing -> Left ReporterNotFound
-  Just r -> Right $ (Board $ bi { reporters = rs' r }, ac' r)
-  where
-    rs' r = Map.insert rk r { ahaCount = ac' r } rs
-    ac' r = (ahaCount r) +1 -- reporter's count
-    rs = reporters bi
-    bi = unBoard b
-
-
-reporterAhaCount :: Board -> ReporterKey -> Maybe Int
-reporterAhaCount b rk = case Map.lookup rk (reporters $ unBoard b) of
-  Nothing -> Nothing
-  Just r -> Just $ ahaCount r
-
-
-totalAhaCount :: Board -> Int
-totalAhaCount b = Map.foldl' (\acc (Reporter _ count) -> acc + count) 0 (reporters $ unBoard b)
+incrementReporterAha :: Board -> ReporterKey -> Either Error (Board, Int)
+incrementReporterAha b rk = do
+  b' <- updateReporter' b rk (\r -> r { dReporterAha = (dReporterAha r) +1 })
+  r' <- reporter' b' rk
+  return (b', dReporterAha r')
 
 
 
