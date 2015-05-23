@@ -2,6 +2,8 @@
 module Board (
   Caption,
   ReporterKey,
+  Aha,
+  TotalAha,
   Board,
   Error(..),
   new,
@@ -35,10 +37,12 @@ import Control.Monad(mzero)
 
 type Caption = String
 type ReporterKey = String
+type Aha = Int
+type TotalAha = Int
 
 data Reporter = Reporter {
   dReporterConnection :: Maybe WS.Connection,
-  dReporterAha :: Int
+  dReporterAha :: Aha
   }
                 
 data BoardImp = BoardImp {
@@ -80,7 +84,7 @@ closeConnection :: Board -> Board
 closeConnection b = Board $ (unBoard b) { dBoardConnection = Nothing } 
 
 
-aha :: Board -> Int
+aha :: Board -> TotalAha
 aha b = Map.foldl' (\acc r -> acc + (dReporterAha r)) 0 (dBoardReporters $ unBoard b)
 
 
@@ -145,25 +149,25 @@ closeReporterConnection b rk =
   updateReporter' b rk (\r -> r { dReporterConnection = Nothing })
          
 
-reporterAha :: Board -> ReporterKey -> Either Error Int
+reporterAha :: Board -> ReporterKey -> Either Error Aha
 reporterAha b rk = dReporterAha <$> reporter' b rk
 
 
-incrementReporterAha :: Board -> ReporterKey -> Either Error (Board, Int)
+incrementReporterAha :: Board -> ReporterKey -> Either Error (Board, Aha, TotalAha)
 incrementReporterAha b rk = do
-  b' <- updateReporter' b rk (\r -> r { dReporterAha = (dReporterAha r) +1 })
-  r' <- reporter' b' rk
-  return (b', dReporterAha r')
+  b'   <- updateReporter' b rk (\r -> r { dReporterAha = (dReporterAha r) +1 })
+  aha' <- reporterAha b' rk
+  return (b', aha', aha b')
 
 
 
 
 instance ToJSON Reporter where
-  toJSON (Reporter _ ahaCount) =
-    object ["ahaCount" .= ahaCount]
+  toJSON (Reporter _ aha) =
+    object ["aha" .= aha]
 
 instance FromJSON Reporter where
-  parseJSON (Object v) = Reporter <$> (pure Nothing) <*> v .: "ahaCount"
+  parseJSON (Object v) = Reporter <$> pure Nothing <*> v .: "aha"
   parseJSON _ = mzero
 
 
@@ -174,7 +178,7 @@ instance ToJSON BoardImp where
            ]
     
 instance FromJSON BoardImp where
-  parseJSON (Object v) = BoardImp <$> v .: "caption" <*> (pure Nothing) <*> v .: "reporters"
+  parseJSON (Object v) = BoardImp <$> v .: "caption" <*> pure Nothing <*> v .: "reporters"
   parseJSON _ = mzero
     
 

@@ -83,14 +83,14 @@ publicKeyFromSecretKey ss bsk = Map.lookup bsk (secrets $ unServerState ss)
 data Item = Item BoardSecretKey BoardPublicKey Board.Board
 
 instance ToJSON Item where
-  toJSON (Item bsk bpk b) =
-    object ["bsk"   .= bsk
-           ,"bpk"   .= bpk
-           ,"board" .= b
+  toJSON (Item sk pk b) =
+    object ["secret_key" .= sk
+           ,"public_key" .= pk
+           ,"board"      .= b
            ]
 
 instance FromJSON Item where
-  parseJSON (Object v) = Item <$> v .: "bsk" <*> v .: "bpk" <*> v.: "board"
+  parseJSON (Object v) = Item <$> v .: "secret_key" <*> v .: "public_key" <*> v.: "board"
   parseJSON _ = mzero
 
 
