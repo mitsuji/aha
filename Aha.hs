@@ -134,10 +134,10 @@ instance ToJSON Response where
 
 webApp :: MVar ServerState -> Wai.Application
 webApp vstate req respond
-  | ["add_board"]    == path = catch (addBoardProc    vstate req respond) onError
-  | ["get_board"]    == path = catch (getBoardProc    vstate req respond) onError
-  | ["add_reporter"] == path = catch (addReporterProc vstate req respond) onError
-  | ["get_reporter"] == path = catch (getReporterProc vstate req respond) onError
+  | (["add_board"]    == path) = (addBoardProc    vstate req respond) `catch` onError
+  | (["get_board"]    == path) = (getBoardProc    vstate req respond) `catch` onError
+  | (["add_reporter"] == path) = (addReporterProc vstate req respond) `catch` onError
+  | (["get_reporter"] == path) = (getReporterProc vstate req respond) `catch` onError
   | otherwise = staticApp req respond -- static html/js/css files
   where
     path = Wai.pathInfo req
@@ -165,57 +165,60 @@ addBoardProc :: MVar ServerState -> Wai.Application
 addBoardProc vstate req respond = do
   (params, _) <- Parse.parseRequestBody Parse.lbsBackEnd req -- parse post parameters
   
-  msk <- nextUUID -- generate UUID for boardSsecretKey
-  let mpk      = Map.lookup "pk"      $ Map.fromList params -- publicKey
-  let mcaption = Map.lookup "caption" $ Map.fromList params -- caption
+  msecretKey <- nextUUID -- generate UUID for secretKey
+  let mpublicKey = Map.lookup "public_key" $ Map.fromList params -- publicKey
+  let mcaption   = Map.lookup "caption"    $ Map.fromList params -- caption
 
-  when (isNothing msk)      $ throwError 10001 "\"sk\" is not generated"
-  when (isNothing mpk)      $ throwError 10002 "\"pk\" is not specified"
-  when (isNothing mcaption) $ throwError 10003 "\"caption\" is not specified"
+  when (isNothing msecretKey) $ throwError 10001 "\"secret_key\" is not generated"
+  when (isNothing mpublicKey) $ throwError 10002 "\"public_key\" is not specified"
+  when (isNothing mcaption)   $ throwError 10003 "\"caption\" is not specified"
 
-  let sk      = UUID.toString $ fromJust msk
-  let pk      = BS.unpack $ fromJust mpk
-  let caption = BS.unpack $ fromJust mcaption
+  let secretKey = UUID.toString $ fromJust msecretKey
+  let publicKey = BS.unpack $ fromJust mpublicKey
+  let caption   = BS.unpack $ fromJust mcaption
 
   vboard <- case Board.new caption of
     Left err -> throwError 10004 ("Board.new failed: " ++ (show err))
     Right board -> newMVar board
 
   modifyMVar_ vstate $ \state ->
-    case addBoard state sk pk vboard of
+    case ServerState.addBoard state secretKey publicKey vboard of
       Left err@BoardSecretKeyDuplicated -> throwError 10005 ("ServerState.addBoard failed: " ++ (show err))
       Left err@BoardPublicKeyDuplicated -> throwError 10006 ("ServerState.addBoard failed: " ++ (show err))
       Left err@BoardSecretKeyInvalid    -> throwError 10007 ("ServerState.addBoard failed: " ++ (show err))
       Left err@BoardPublicKeyInvalid    -> throwError 10008 ("ServerState.addBoard failed: " ++ (show err))
       Right board' -> return board'
     
-  putStrLn $ "addBoard: sk: " ++ sk ++ " pk: " ++ pk ++ " caption: " ++ caption
+  putStrLn $ "ServerState.addBoard: secretKey: " ++ secretKey ++ " publicKey: " ++ publicKey ++ " caption: " ++ caption
 
   respond $ Wai.responseLBS
     H.status200
     [contentTypeJsonHeader]
-    ( AE.encode $ ResponseBoard sk pk caption 0 )
+    ( AE.encode $ ResponseBoard secretKey publicKey caption 0 )
 
 
 getBoardProc :: MVar ServerState -> Wai.Application
 getBoardProc vstate req respond = do
   (params, _) <- Parse.parseRequestBody Parse.lbsBackEnd req -- parse post parameters
 
-  let msk = Map.lookup "sk" $ Map.fromList params -- secretKey
-  when (isNothing msk) $ throwError 10001 "\"sk\" is not specified"
-  let sk = BS.unpack $ fromJust msk
+  let msecretKey = Map.lookup "secret_key" $ Map.fromList params -- secretKey
+  when (isNothing msecretKey) $ throwError 10001 "\"secret_key\" is not specified"
+  let secretKey = BS.unpack $ fromJust msecretKey
 
   state <- readMVar vstate
-  (pk, board) <- case publicKeyFromSecretKey state sk of
-    Nothing -> throwError 10002 "\"sk\" is not found"
-    Just pk -> case boardFromPublicKey state pk of
-      Nothing -> throwError 10003 "\"pk\" is not found"
-      Just vboard -> readMVar vboard >>= \board -> return (pk,board)
+  publicKey <- case ServerState.publicKeyFromSecretKey state secretKey of
+    Nothing -> throwError 10002 "\"secret_key\" is not found"
+    Just publicKey -> return publicKey
+  board <- case ServerState.boardFromPublicKey state publicKey of
+    Nothing -> throwError 10003 "\"public_key\" is not found"
+    Just vboard -> do
+      board <-readMVar vboard
+      return board
 
   respond $ Wai.responseLBS
     H.status200
     [contentTypeJsonHeader]
-    ( AE.encode $ ResponseBoard sk pk (caption board) (aha board) )
+    ( AE.encode $ ResponseBoard secretKey publicKey (Board.caption board) (Board.aha board) )
 
 
 
@@ -224,61 +227,60 @@ addReporterProc :: MVar ServerState -> Wai.Application
 addReporterProc vstate req respond = do
   (params, _) <- Parse.parseRequestBody Parse.lbsBackEnd req -- parse post parameters
 
-  mrsk <- nextUUID -- generate UUID for reporterSecretKey
-  let mbpk = Map.lookup "bpk" $ Map.fromList params
+  mreporterKey <- nextUUID -- generate UUID for reporterKey
+  let mboardPublicKey = Map.lookup "board_public_key" $ Map.fromList params
 
-  when (isNothing mrsk) $ throwError 10001 "\"rsk\" is not generated"
-  when (isNothing mbpk) $ throwError 10002 "\"bpk\" is not specified"
+  when (isNothing mreporterKey)    $ throwError 10001 "\"reporter_key\" is not generated"
+  when (isNothing mboardPublicKey) $ throwError 10002 "\"board_public_key\" is not specified"
 
-  let rsk = UUID.toString $ fromJust mrsk
-  let bpk = BS.unpack $ fromJust mbpk
+  let reporterKey    = UUID.toString $ fromJust mreporterKey
+  let boardPublicKey = BS.unpack $ fromJust mboardPublicKey
 
   state <- readMVar vstate
-  board <- case boardFromPublicKey state bpk of
-    Nothing -> throwError 10003 "\"bpk\" is not found"
+  board <- case ServerState.boardFromPublicKey state boardPublicKey of
+    Nothing -> throwError 10003 "\"board_public_key\" is not found"
     Just vboard -> modifyMVar vboard $ \board -> do
-      case addReporter board rsk of
+      case Board.addReporter board reporterKey of
         Left err -> throwError 10004 ("Board.addReporter failed: " ++ (show err))
         Right board' -> return (board', board')
       
-  putStrLn $ "addReporter: rsk: " ++ rsk ++ " bpk: " ++ bpk
-
+  putStrLn $ "Board.addReporter: reporterKey: " ++ reporterKey ++ " boardPublicKey: " ++ boardPublicKey
+  
   respond $ Wai.responseLBS
     H.status200
     [contentTypeJsonHeader]
-    ( AE.encode $ ResponseReporter rsk 0 bpk (caption board) (aha board) )
+    ( AE.encode $ ResponseReporter reporterKey 0 boardPublicKey (Board.caption board) (Board.aha board) )
   
     
 getReporterProc :: MVar ServerState -> Wai.Application
 getReporterProc vstate req respond = do
   (params, _) <- Parse.parseRequestBody Parse.lbsBackEnd req -- parse post parameters
   
-  let mrsk = Map.lookup "rsk" $ Map.fromList params
-  let mbpk = Map.lookup "bpk" $ Map.fromList params
+  let mreporterKey    = Map.lookup "reporter_key"     $ Map.fromList params
+  let mboardPublicKey = Map.lookup "board_public_key" $ Map.fromList params
       
-  when (isNothing mrsk) $ throwError 10001 "\"rsk\" is not specified"
-  when (isNothing mbpk) $ throwError 10002 "\"bpk\" is not specified"
+  when (isNothing mreporterKey)    $ throwError 10001 "\"reporter_key\" is not specified"
+  when (isNothing mboardPublicKey) $ throwError 10002 "\"board_public_key\" is not specified"
 
-  let rsk = BS.unpack $ fromJust mrsk
-  let bpk = BS.unpack $ fromJust mbpk
+  let reporterKey    = BS.unpack $ fromJust mreporterKey
+  let boardPublicKey = BS.unpack $ fromJust mboardPublicKey
 
   state <- readMVar vstate
-  board <- case boardFromPublicKey state bpk of
-    Nothing -> throwError 10003 "\"bpk\" is not found"
+  board <- case ServerState.boardFromPublicKey state boardPublicKey of
+    Nothing -> throwError 10003 "\"board_public_key\" is not found"
     Just vboard -> do
       board <- readMVar vboard
-      case hasReporter board rsk of
-        False -> throwError 10004 "\"rsk\" is not found"
+      case Board.hasReporter board reporterKey of
+        False -> throwError 10004 "\"reporter_key\" is not found"
         True -> return board
-
-  raha <- case reporterAha board rsk of
+  raha <- case Board.reporterAha board reporterKey of
     Left err -> throwError 10005 ("Board.reporterAha failed: " ++ (show err))
     Right aha -> return aha
 
   respond $ Wai.responseLBS
     H.status200
     [contentTypeJsonHeader]
-    ( AE.encode $ ResponseReporter rsk raha bpk (caption board) (aha board) )
+    ( AE.encode $ ResponseReporter reporterKey raha boardPublicKey (Board.caption board) (Board.aha board) )
 
 
 
@@ -305,8 +307,8 @@ instance ToJSON Message where
 -- [TODO] websocket error
 websocketApp :: MVar ServerState -> WS.ServerApp
 websocketApp state pconn
-  | "/board"    == path = boardServer state pconn
-  | "/reporter" == path = reporterServer state pconn
+  | ("/board"    == path) = boardServer state pconn
+  | ("/reporter" == path) = reporterServer state pconn
   | otherwise = WS.rejectRequest pconn "request rejected"
   where
     requestPath = WS.requestPath $ WS.pendingRequest pconn
@@ -317,23 +319,23 @@ boardServer :: MVar ServerState -> WS.ServerApp
 boardServer vstate pconn = do
   putStrLn $ "boardServer: " ++ BS.unpack(requestPath) -- debug
 
-  let msk = Map.lookup "bk" $ Map.fromList query
-  when (isNothing msk) $ throwError 20001 "\"bk\" is not specified"
-  let sk = BS.unpack $ fromJust msk
+  let msecretKey = Map.lookup "secret_key" $ Map.fromList query
+  when (isNothing msecretKey) $ throwError 20001 "\"secret_key\" is not specified"
+  let secretKey = BS.unpack $ fromJust msecretKey
 
   vboard <- do
     state <- readMVar vstate
-    case publicKeyFromSecretKey state sk of
-      Nothing -> throwError 20002 "\"bk\" is not found"
-      Just pk -> case boardFromPublicKey state pk of
-        Nothing -> throwError 20003 "\"pk\" is not found"
+    case ServerState.publicKeyFromSecretKey state secretKey of
+      Nothing -> throwError 20002 "\"secret_key\" is not found"
+      Just publicKey -> case ServerState.boardFromPublicKey state publicKey of
+        Nothing -> throwError 20003 "\"public_key\" is not found"
         Just vboard -> return vboard
 
   conn <- WS.acceptRequest pconn
   WS.forkPingThread conn 30
 
   modifyMVar_ vboard $ \board ->
-    case setConnection board conn of
+    case Board.setConnection board conn of
       Left err -> throwError 20004 ("Board.setConnection failed: " ++ (show err))
       Right board' -> return board'
 
@@ -342,7 +344,7 @@ boardServer vstate pconn = do
   where
     requestPath = WS.requestPath $ WS.pendingRequest pconn
     query = parseSimpleQuery $ BS.dropWhile (/='?') requestPath
-    disconnect vboard = modifyMVar_ vboard $ \board -> return $ closeConnection board
+    disconnect vboard = modifyMVar_ vboard $ \board -> return $ Board.closeConnection board
 
 
 boardLoop :: WS.Connection -> MVar Board -> IO ()
@@ -350,10 +352,10 @@ boardLoop conn vboard = forever $ do
   msg <- WS.receiveData conn :: IO BS.ByteString
   
   board <- modifyMVar vboard $ \board -> do
-    let board' = reset board
+    let board' = Board.reset board
     return (board',board')
 
-  mapM_ (\rconn-> WS.sendTextData rconn $ AE.encode MessageReset) (reporterConnections board) 
+  mapM_ (\c-> WS.sendTextData c $ AE.encode MessageReset) (Board.reporterConnections board) 
   WS.sendTextData conn $ AE.encode MessageReset
   
     
@@ -363,34 +365,34 @@ reporterServer :: MVar ServerState.ServerState -> WS.ServerApp
 reporterServer vstate pconn = do
   putStrLn $ "reporterServer: " ++ BS.unpack(requestPath) -- debug
 
-  let mbpk = Map.lookup "bk" $ Map.fromList query
-  let mrsk = Map.lookup "rk" $ Map.fromList query
+  let mboardPublicKey = Map.lookup "board_public_key" $ Map.fromList query
+  let mreporterKey    = Map.lookup "reporter_key"     $ Map.fromList query
 
-  when (isNothing mbpk) $ throwError 20001 "\"bk\" is not specified"
-  when (isNothing mrsk) $ throwError 20002 "\"rk\" is not specified"
+  when (isNothing mboardPublicKey) $ throwError 20001 "\"board_public_key\" is not specified"
+  when (isNothing mreporterKey)    $ throwError 20002 "\"reporter_key\" is not specified"
 
-  let bpk = BS.unpack $ fromJust mbpk
-  let rsk = BS.unpack $ fromJust mrsk
+  let boardPublicKey = BS.unpack $ fromJust mboardPublicKey
+  let reporterKey    = BS.unpack $ fromJust mreporterKey
       
   state <- readMVar vstate
-  vboard <- case boardFromPublicKey state bpk of
-    Nothing -> throwError 20003 "\"bk\" is not found"
+  vboard <- case ServerState.boardFromPublicKey state boardPublicKey of
+    Nothing -> throwError 20003 "\"board_public_key\" is not found"
     Just vboard -> do
       board <- readMVar vboard
-      case hasReporter board rsk of
-        False -> throwError 20004 "\"rk\" is not found"
+      case Board.hasReporter board reporterKey of
+        False -> throwError 20004 "\"reporter_key\" is not found"
         True -> return vboard
   
   conn <- WS.acceptRequest pconn
   WS.forkPingThread conn 30
-
+  
   modifyMVar_ vboard $ \board ->
-    case setReporterConnection board rsk conn of
+    case Board.setReporterConnection board reporterKey conn of
       Left err@ReporterNotFound       -> throwError 20005 ("Board.setReporterConnection failed: " ++ (show err))
       Left err@ActiveConnectionExists -> throwError 20006 ("Board.setReporterConnection failed: " ++ (show err))
       Right board' -> return board'
 
-  finally (reporterLoop conn vboard rsk) $ disconnect vboard rsk
+  finally (reporterLoop conn vboard reporterKey) $ disconnect vboard reporterKey
     
   where
     requestPath = WS.requestPath $ WS.pendingRequest pconn
@@ -398,24 +400,24 @@ reporterServer vstate pconn = do
 
     disconnect vboard rk =
       modifyMVar_ vboard $ \board ->
-        case closeReporterConnection board rk of
+        case Board.closeReporterConnection board rk of
           Left err -> throwError 20007 ("Board.closeReporterConnection failed: " ++ (show err))
           Right board' -> return board'
 
 
 reporterLoop :: WS.Connection -> MVar Board -> ReporterKey -> IO ()
-reporterLoop conn vboard reporterSecretKey = forever $ do
+reporterLoop conn vboard reporterKey = forever $ do
   msg <- WS.receiveData conn :: IO BS.ByteString
   
   (board, aha, ta) <- modifyMVar vboard $ \board ->
-    case incrementReporterAha board reporterSecretKey of
+    case Board.incrementReporterAha board reporterKey of
       Left err -> throwError 20008 ("Board.incrementReporterAha failed: " ++ (show err))
       Right result@(board', _, _) -> return (board', result)
                               
   WS.sendTextData conn $ AE.encode $ MessageAha aha
-  let bconn = connection board
-  when (isJust bconn) $ WS.sendTextData (fromJust bconn) $ AE.encode $ MessageTotalAha ta
-  mapM_ (\rconn-> WS.sendTextData rconn $ AE.encode $ MessageTotalAha ta) (reporterConnections board)
+  let mbconn = Board.connection board
+  when (isJust mbconn) $ WS.sendTextData (fromJust mbconn) $ AE.encode $ MessageTotalAha ta
+  mapM_ (\c-> WS.sendTextData c $ AE.encode $ MessageTotalAha ta) (Board.reporterConnections board)
 
 
 

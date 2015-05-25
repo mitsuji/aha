@@ -19,22 +19,22 @@ $(document).ready(function () {
     var posQuery = url.indexOf('?');
     if( posQuery >= 0 ) {
 
-	var bk = url.substr( posQuery +1 );
-	console.log('localStorage: rk: ' + localStorage.getItem('rk:' + bk));
+	var boardPublicKey = url.substr( posQuery +1 );
+	console.log('localStorage: rk: ' + localStorage.getItem('rk:' + boardPublicKey));
 	
-	if(localStorage.getItem('rk:' + bk) != null) {
-	    resume(bk);
+	if(localStorage.getItem('rk:' + boardPublicKey) != null) {
+	    resume(boardPublicKey);
 	} else {
-	    create(bk);
+	    create(boardPublicKey);
 	}
 	
     }
 
 
-    function resume( bk ) {
+    function resume( boardPublicKey ) {
 	$.post(
 	    'http://' + location.host + '/get_reporter',
-	    {bpk: bk, rsk: localStorage.getItem('rk:' + bk)},
+	    {board_public_key: boardPublicKey, reporter_key: localStorage.getItem('rk:' + boardPublicKey)},
 	    function (data){
 		if(data.success) {
 		    localStorage.setItem('rk:' + data.content.board_public_key, data.content.reporter_key)
@@ -46,7 +46,7 @@ $(document).ready(function () {
 			alert("error: " + data.error_code + ": " + data.message);
 			break;
 		    default:
-			create(bk);
+			create(boardPublicKey);
 			break;
 		    }
 		}
@@ -56,10 +56,10 @@ $(document).ready(function () {
     }
 
     
-    function create( bk ) {
+    function create( boardPublicKey ) {
 	$.post(
 	    'http://' + location.host + '/add_reporter',
-	    {bpk: bk},
+	    {board_public_key: boardPublicKey},
 	    function (data){
 		if(data.success) {
 		    localStorage.setItem('rk:' + data.content.board_public_key, data.content.reporter_key)
@@ -79,7 +79,7 @@ $(document).ready(function () {
 	//
 	// WebSocketクライアントの実装
 	//
-	var ws = webSocketUtil.webSocket('/reporter?bk=' + content.board_public_key + "&rk=" + content.reporter_key);
+	var ws = webSocketUtil.webSocket('/reporter?board_public_key=' + content.board_public_key + "&reporter_key=" + content.reporter_key);
 	
 	ws.onopen = function() {
 	    setConnect(true);
