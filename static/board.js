@@ -9,9 +9,44 @@ $(document).ready(function () {
     setConnect(false);
     setCaption('');
     setTotal('0');
+
+
+    //
+    // jQuery Dialog
+    //
+    $('#create-board-dialog').dialog({
+	autoOpen: false,
+	height: 400,
+	width: 400,
+	modal: true,
+	buttons: {
+            'Create a Board': onCreateButton
+	},
+	beforeClose: function(event) {
+// forbid close
+//	    event.preventDefault();
+	}
+    });
+    
+    function onCreateButton() {
+	// validation
+	doCreate($('#newPublicKey').val(),$('#newCaption').val());
+	$('#create-board-dialog').dialog('close');
+    }
+
+    $('#create-board-dialog').find('form').on('submit', function( event ) {
+	event.preventDefault();
+	onCreateButton();
+    });
+
+    function openCreateBoardDialog() {
+	$('#create-board-dialog').dialog('open');
+    }
+
     
     console.log('localStorage: bk: ' + localStorage.getItem('bk'));
 
+    
     if(localStorage.getItem('bk') != null) {
 	resume();
     } else {
@@ -30,7 +65,7 @@ $(document).ready(function () {
 		} else {
 		    switch(data.error_code) {
 		    case 10001:
-			alert("error: " + data.error_code + ": " + data.message);
+			alert('error: ' + data.error_code + ': ' + data.message);
 			break;
 		    default:
 			create();
@@ -38,24 +73,28 @@ $(document).ready(function () {
 		    }
 		}
 	    },
-	    "json"
+	    'json'
 	);
     }
     
 
     function create() {
+	openCreateBoardDialog();
+    }
+    
+    function doCreate( pPublicKey, pCaption ) {
 	$.post(
 	    'http://' + location.host + '/add_board',
-	    {public_key: "mitsujitest1", caption: "mitsuji test1"},
+	    {public_key: pPublicKey, caption: pCaption},
 	    function (data){
 		if(data.success) {
 		    localStorage.setItem('bk',data.content.secret_key);
 		    connect(data.content);
 		} else {
-		    alert("error: " + data.error_code + ": " + data.message);
+		    alert('error: ' + data.error_code + ': ' + data.message);
 		}
 	    },
-	    "json"
+	    'json'
 	);
     }
 
@@ -127,37 +166,7 @@ $(document).ready(function () {
 	$('#reporterAddress').text(reporter_url);
 	$('#qr').attr('src',qr_url);
     }
-    
 
-    var dialog, form;
-    
-    dialog = $( "#dialog-form" ).dialog({
-      autoOpen: false,
-      height: 400,
-      width: 400,
-      modal: true,
-      buttons: {
-        "Create a board": function(){ console.log("go!!")},
-        Cancel: function() {
-          dialog.dialog( "close" );
-        }
-      },
-      close: function() {
-        form[ 0 ].reset();
-        allFields.removeClass( "ui-state-error" );
-      }
-    });
- 
-    form = dialog.find( "form" ).on( "submit", function( event ) {
-      event.preventDefault();
-	console.log("go!!");
-    });
- 
-    $( "#create-user" ).button().on( "click", function() {
-      dialog.dialog( "open" );
-    });
-    
-//    dialog.dialog( "open" );
     
 });
 
