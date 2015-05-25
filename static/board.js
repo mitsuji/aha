@@ -22,7 +22,7 @@ $(document).ready(function () {
     function resume() {
 	$.post(
 	    'http://' + location.host + '/get_board',
-	    {sk: localStorage.getItem('bk')},
+	    {secret_key: localStorage.getItem('bk')},
 	    function (data){
 		if(data.success) {
 		    localStorage.setItem('bk',data.content.secret_key);
@@ -46,7 +46,7 @@ $(document).ready(function () {
     function create() {
 	$.post(
 	    'http://' + location.host + '/add_board',
-	    {pk: "mitsujitest1", caption: "mitsuji test1"},
+	    {public_key: "mitsujitest1", caption: "mitsuji test1"},
 	    function (data){
 		if(data.success) {
 		    localStorage.setItem('bk',data.content.secret_key);
@@ -66,7 +66,7 @@ $(document).ready(function () {
 	//
 	// WebSocketクライアントの実装
 	//
-	var ws = webSocketUtil.webSocket('/board?bk=' + content.secret_key);
+	var ws = webSocketUtil.webSocket('/board?secret_key=' + content.secret_key);
 	
 	ws.onopen = function() {
 	    setConnect(true);

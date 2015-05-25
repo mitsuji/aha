@@ -54,15 +54,19 @@ new :: ServerState
 new = ServerState $ ServerStateImp Map.empty Map.empty
 
 
--- [TODO] Input validation
 addBoard :: ServerState -> BoardSecretKey -> BoardPublicKey -> MVar Board.Board -> Either Error ServerState
-addBoard ss bsk bpk vboard =
-  case Map.member bsk srs of
+addBoard ss bsk bpk vboard
+  | not $ isValidSecretKey bsk = Left BoardSecretKeyInvalid
+  | not $ isValidPublicKey bpk = Left BoardPublicKeyInvalid
+  | otherwise = case Map.member bsk srs of
     True -> Left BoardSecretKeyDuplicated
     False -> case Map.member bpk bds of
       True -> Left BoardPublicKeyDuplicated
       False ->  Right $ ServerState $ ServerStateImp srs' bds'
   where
+    isValidSecretKey cand = True -- must be UUID
+    isValidPublicKey cand = (all (\c -> elem c "abcdefghijklmnopqrstuvwxyz0123456789") cand)
+                            && (0 < length cand && length cand <= 20)
     srs' = Map.insert bsk bpk srs
     bds' = Map.insert bpk vboard bds
     srs = secrets ssi

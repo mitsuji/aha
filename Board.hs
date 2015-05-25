@@ -61,9 +61,13 @@ data Error = CaptionInvalid
 
 
 
--- [TODO] caption validation
+
 new :: Caption -> Either Error Board
-new c = Right $ Board $ BoardImp c Nothing Map.empty
+new c
+  | not $ isValidCaption c = Left CaptionInvalid
+  | otherwise              = Right $ Board $ BoardImp c Nothing Map.empty
+  where
+    isValidCaption cand = 0 < length cand && length cand <= 20
 
 
 caption :: Board -> Caption
