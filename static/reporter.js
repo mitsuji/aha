@@ -43,7 +43,7 @@ $(document).ready(function () {
 		    switch(data.error_code) {
 		    case 10001:
 		    case 10002:
-			alert("error: " + data.error_code + ": " + data.message);
+			alert('error: ' + data.error_code + ': ' + data.message);
 			break;
 		    default:
 			create(boardPublicKey);
@@ -51,7 +51,7 @@ $(document).ready(function () {
 		    }
 		}
 	    },
-	    "json"
+	    'json'
 	);
     }
 
@@ -65,10 +65,10 @@ $(document).ready(function () {
 		    localStorage.setItem('rk:' + data.content.board_public_key, data.content.reporter_key)
 		    connect(data.content);
 		} else {
-		    alert("error: " + data.error_code + ": " + data.message);
+		    alert('error: ' + data.error_code + ': ' + data.message);
 		}
 	    },
-	    "json"
+	    'json'
 	);
     }
     
@@ -79,7 +79,7 @@ $(document).ready(function () {
 	//
 	// WebSocketクライアントの実装
 	//
-	var ws = webSocketUtil.webSocket('/reporter?board_public_key=' + content.board_public_key + "&reporter_key=" + content.reporter_key);
+	var ws = webSocketUtil.webSocket('/reporter?board_public_key=' + content.board_public_key + '&reporter_key=' + content.reporter_key);
 	
 	ws.onopen = function() {
 	    setConnect(true);
@@ -94,7 +94,7 @@ $(document).ready(function () {
     
 	ws.onmessage = function(event) {
 	    console.log('onmessage: ' + event.data );
-	    eval ("var json = " + event.data + ";" ); // [TODO] must be danger
+	    eval ('var json = ' + event.data + ';' ); // [TODO] must be danger
 	    if(json.type == 'aha') {
 		setAha(json.content);
 	    } else if(json.type == 'total_aha') {
@@ -109,7 +109,7 @@ $(document).ready(function () {
 	//
 	// AHAボタン押下
 	//
-	$('#aha')[0].addEventListener("touchend",function(e){
+	$('#aha')[0].addEventListener('touchend',function(e){
             ws.send('aha');
 	},false);
 	
