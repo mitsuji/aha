@@ -10,42 +10,60 @@ $(document).ready(function () {
     setCaption('');
     setTotal('0');
 
+    //
+    // dialog object (Singleton)
+    //
+    var boardDialog = function( fOnSubmit ) {
 
-    //
-    // jQuery Dialog
-    //
-    $('#create-board-dialog').dialog({
-	autoOpen: false,
-	height: 400,
-	width: 400,
-	modal: true,
-	buttons: {
-            'Create a Board': onCreateButton
-	},
-	beforeClose: function(event) {
-// forbid close
-//	    event.preventDefault();
-	}
-    });
+	var canClose;
+	var divElem = $('#create-board-dialog');
+	
+	divElem.dialog({
+	    autoOpen: false,
+	    height: 400,
+	    width: 400,
+	    modal: true,
+	    buttons: {
+		'Create a Board': submit
+	    },
+	    beforeClose: function(event) {
+		if(!canClose) {
+		    event.preventDefault();
+		}
+	    }
+	});
     
-    function onCreateButton() {
-	// validation
-	doCreate($('#newPublicKey').val(),$('#newCaption').val());
-	$('#create-board-dialog').dialog('close');
-    }
+	divElem.find('form').on('submit', function( event ) {
+	    event.preventDefault();
+	    submit();
+	});
 
-    $('#create-board-dialog').find('form').on('submit', function( event ) {
-	event.preventDefault();
-	onCreateButton();
-    });
+	function submit() {
+	    // validation
+	    var publicKey = $('#newPublicKey').val();
+	    var caption   = $('#newCaption').val(); 
+	    fOnSubmit(publicKey,caption);
+	}
 
-    function openCreateBoardDialog() {
-	$('#create-board-dialog').dialog('open');
-    }
+	//
+	// public methods
+	//
+	return {
+	    open: function () {
+		divElem.dialog('open');
+		canClose = false;
+	    },
+	    close: function () {
+		canClose = true;
+		divElem.dialog('close');
+	    }
+	};
+	
+    }(onCreate);
+
 
     
     console.log('localStorage: bk: ' + localStorage.getItem('bk'));
-
     
     if(localStorage.getItem('bk') != null) {
 	resume();
@@ -78,16 +96,18 @@ $(document).ready(function () {
     }
     
 
+
     function create() {
-	openCreateBoardDialog();
+	boardDialog.open();
     }
     
-    function doCreate( pPublicKey, pCaption ) {
+    function onCreate( publicKey, caption ) {
 	$.post(
 	    'http://' + location.host + '/add_board',
-	    {public_key: pPublicKey, caption: pCaption},
+	    {public_key: publicKey, caption: caption},
 	    function (data){
 		if(data.success) {
+		    boardDialog.close();
 		    localStorage.setItem('bk',data.content.secret_key);
 		    connect(data.content);
 		} else {
@@ -111,6 +131,7 @@ $(document).ready(function () {
 	    setConnect(true);
 	    setCaption(content.caption);
 	    setTotal(content.total_aha);
+	    setReporterAddress(content.public_key);
 	    setQr(content.public_key);
 	};
 	
@@ -159,13 +180,23 @@ $(document).ready(function () {
 	$('#total').text( total );
     }
 
-    function setQr( public_key ) {
-	var reporter_url = 'http://' + location.host + '/reporter.html?' + public_key;
+    
+    function getReporterAddress( publicKey ) {
+	return 'http://' + location.host + '/reporter.html?' + publicKey;
+    }
+    
+    function setReporterAddress( publicKey ) {
+	var reporter_url = getReporterAddress(publicKey);
+	$('#reporterAddress').text(reporter_url);
+    }
+
+    function setQr( publicKey ) {
+	var reporter_url = getReporterAddress(publicKey);
 	var qr_url = 'https://chart.googleapis.com/chart';
 	qr_url += '?chs=300x300&cht=qr&chl=' + reporter_url;
-	$('#reporterAddress').text(reporter_url);
 	$('#qr').attr('src',qr_url);
     }
+
 
     
 });
