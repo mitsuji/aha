@@ -12,14 +12,22 @@ $(document).ready(function () {
     setAha('0');
 
 
-    //
-    // boarder key が指定されていないときは何もしない
-    //
-    var url = document.location.href;
-    var posQuery = url.indexOf('?');
-    if( posQuery >= 0 ) {
+    var boardPublicKey = function() {
+	var url = location.href;
+	var posQuery = url.indexOf('?');
+	if( posQuery >= 0 ) {
+	    return url.substr( posQuery +1 );
+	} else {
+	    return null;
+	}
+    }();
 
-	var boardPublicKey = url.substr( posQuery +1 );
+    
+    //
+    // boarderPublicKey が指定されていないときは何もしない
+    //
+    if( boardPublicKey != null ) {
+
 	console.log('localStorage: rk: ' + localStorage.getItem('rk:' + boardPublicKey));
 	
 	if(localStorage.getItem('rk:' + boardPublicKey) != null) {
@@ -30,7 +38,7 @@ $(document).ready(function () {
 	
     }
 
-
+    
     function resume( boardPublicKey ) {
 	$.post(
 	    'http://' + location.host + '/get_reporter',
