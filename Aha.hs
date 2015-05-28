@@ -18,6 +18,8 @@ import Control.Exception (Exception,catch,throwIO,finally)
 import Control.Monad (forever, when)
 import qualified Data.ByteString.Char8 as BS -- use for input 
 import qualified Data.ByteString.Lazy.Char8 as LBS -- use for output
+import qualified Data.Text as T
+import Data.Text.Encoding (decodeUtf8)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (isJust,isNothing,fromJust)
 import Network.HTTP.Types.URI (parseSimpleQuery)
@@ -174,8 +176,8 @@ addBoardProc vstate req respond = do
   when (isNothing mcaption)   $ throwError 10003 "\"caption\" is not specified"
 
   let secretKey = UUID.toString $ fromJust msecretKey
-  let publicKey = BS.unpack $ fromJust mpublicKey
-  let caption   = BS.unpack $ fromJust mcaption
+  let publicKey = T.unpack $ decodeUtf8 $ fromJust mpublicKey
+  let caption   = T.unpack $ decodeUtf8 $ fromJust mcaption
 
   vboard <- case Board.new caption of
     Left err -> throwError 10004 ("Board.new failed: " ++ (show err))
@@ -203,7 +205,7 @@ getBoardProc vstate req respond = do
 
   let msecretKey = Map.lookup "secret_key" $ Map.fromList params -- secretKey
   when (isNothing msecretKey) $ throwError 10001 "\"secret_key\" is not specified"
-  let secretKey = BS.unpack $ fromJust msecretKey
+  let secretKey = T.unpack $ decodeUtf8 $ fromJust msecretKey
 
   state <- readMVar vstate
   publicKey <- case ServerState.publicKeyFromSecretKey state secretKey of
@@ -234,7 +236,7 @@ addReporterProc vstate req respond = do
   when (isNothing mboardPublicKey) $ throwError 10002 "\"board_public_key\" is not specified"
 
   let reporterKey    = UUID.toString $ fromJust mreporterKey
-  let boardPublicKey = BS.unpack $ fromJust mboardPublicKey
+  let boardPublicKey = T.unpack $ decodeUtf8 $ fromJust mboardPublicKey
 
   state <- readMVar vstate
   board <- case ServerState.boardFromPublicKey state boardPublicKey of
@@ -262,8 +264,8 @@ getReporterProc vstate req respond = do
   when (isNothing mreporterKey)    $ throwError 10001 "\"reporter_key\" is not specified"
   when (isNothing mboardPublicKey) $ throwError 10002 "\"board_public_key\" is not specified"
 
-  let reporterKey    = BS.unpack $ fromJust mreporterKey
-  let boardPublicKey = BS.unpack $ fromJust mboardPublicKey
+  let reporterKey    = T.unpack $ decodeUtf8 $ fromJust mreporterKey
+  let boardPublicKey = T.unpack $ decodeUtf8 $ fromJust mboardPublicKey
 
   state <- readMVar vstate
   board <- case ServerState.boardFromPublicKey state boardPublicKey of
@@ -321,7 +323,7 @@ boardServer vstate pconn = do
 
   let msecretKey = Map.lookup "secret_key" $ Map.fromList query
   when (isNothing msecretKey) $ throwError 20001 "\"secret_key\" is not specified"
-  let secretKey = BS.unpack $ fromJust msecretKey
+  let secretKey = T.unpack $ decodeUtf8 $ fromJust msecretKey
 
   vboard <- do
     state <- readMVar vstate
@@ -371,8 +373,8 @@ reporterServer vstate pconn = do
   when (isNothing mboardPublicKey) $ throwError 20001 "\"board_public_key\" is not specified"
   when (isNothing mreporterKey)    $ throwError 20002 "\"reporter_key\" is not specified"
 
-  let boardPublicKey = BS.unpack $ fromJust mboardPublicKey
-  let reporterKey    = BS.unpack $ fromJust mreporterKey
+  let boardPublicKey = T.unpack $ decodeUtf8 $ fromJust mboardPublicKey
+  let reporterKey    = T.unpack $ decodeUtf8 $ fromJust mreporterKey
       
   state <- readMVar vstate
   vboard <- case ServerState.boardFromPublicKey state boardPublicKey of
