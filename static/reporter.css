@@ -1,0 +1,77 @@
+@import url(http://fonts.googleapis.com/css?family=Gentium+Basic:700italic);
+@charset "utf-8";
+
+/* css */
+*{
+   margin: 0;
+   padding: 0; 
+}
+
+html{
+	font-size: 14px;
+}
+
+body{
+	font-family: 'Gentium Basic', serif;
+	color:#f035cf;
+	background-color:#ffffff;
+	width: 100%;      /* 幅をウィンドウサイズに合わせて100％に指定*/
+  max-width: 800px; /* 追加：幅は最大で800pxまで広がるようにする */
+  min-width: 300px; /* 追加：幅は最小で300pxまで狭まるようにする */
+  margin: 0 auto;　 /* 追加：ページをウィンドウ幅に対して真ん中にくるようにする */
+  line-height: 1.7;	
+	
+}
+#bar_white{
+	width: 10px;
+	height:120%;
+	background-color: #ffffff;
+	display: inline-block;
+}
+
+#bar_pink{
+	width: 50px;
+	height: 120%;
+	background-color: #f035cf;
+	display: inline-block;
+	background-image: url(img/bg_reporter.png),url(img/bg_line_w.png);
+	background-repeat: no-repeat, repeat-y;
+	background-position: 5px 10%, 5px,0;
+}
+
+#main{
+	box-sizing: border-box;
+	width:100%;
+	margin: 10px 0 10px -60px;/*  左方向に負のマージンを指定  */
+	padding-left: 60px;
+	float: right;
+	display: inline-block;
+	vertical-align: top;
+}
+
+#connectionStatus{
+ color:#ffffff
+}
+
+#connectionStatus .ok{
+	border-top: 20px solid #ffffff;
+	background-color:#f035cf;
+}
+
+#connectionStatus .ng{
+	border-top: 20px solid #ffffff;
+	background-color:#a0a0a0;
+}
+
+#ahaCount{
+	font-size: 34px;
+}
+
+#totalCount{
+	font-size: 34px;
+}
+
+#ahabtn{
+	text-align: center;
+}
+
