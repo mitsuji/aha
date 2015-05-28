@@ -201,3 +201,59 @@ $(document).ready(function () {
     
 });
 
+
+
+/* .: @Samantha :. */
+
+$(window).load(function(){
+    //
+    // モーダルウィンドウ
+    //
+    $("#modal-open").click( function(){
+    	$( this ).blur() ;	//ボタンからフォーカスを外す
+		if( $( "#modal-overlay" )[0] ) return false ;		//新しくモーダルウィンドウを起動しない
+		$( "body" ).append( '<div id="modal-overlay"></div>' ) ;
+		
+		var overlay$ = $("#modal-overlay");
+		var qr$ = $("#modal-qr");
+		
+		overlay$.fadeIn( "slow" );
+		centeringModalSyncer() ;
+		qr$.fadeIn( "slow" ) ;
+		
+		
+		$("#modal-overlay,#modal-close").off().click(function(){	
+			$("#modal-qr,#modal-overlay").fadeOut("slow" , function(){
+				overlay$.remove();
+			} ) ;
+		} ) ;
+    	
+    });
+});
+
+//
+//リサイズされた時のモーダルウィンドウの位置
+//
+var timer = false; /* グローバル変数 */
+$(window).resize(function() {
+    if(timer !== false){
+    	clearTimeout(timer);
+    }
+    timer = setTimeout(function() {
+    	centeringModalSyncer();
+   }, 200);
+});
+
+//
+// モーダルウィンドウのセンタリング関数
+//
+function centeringModalSyncer() {
+  	var qr$ = $("#modal-qr");
+	var w = $( window ).width();
+	var h = $( window ).height();
+	console.log(w+"..,"+h);
+	var cw = qr$.outerWidth( true );
+	var ch = qr$.outerHeight( true );
+	console.log(cw+".,,"+ch);
+	qr$.css( {"left": ((w - cw)/2) + "px","top": ((h - ch)/2)-(ch/2) + "px"} ) ;
+}

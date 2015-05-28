@@ -2,10 +2,10 @@
   <head>
     <meta content="text/html" charset="UTF-8"/> 
     <title>AHA :: Board</title>
-    <!-- script src="http://ajax.googleapis.com/ajax/libs/jquery/1.9.0/jquery.min.js"></script -->
     <link rel="stylesheet" href="http://code.jquery.com/ui/1.11.4/themes/smoothness/jquery-ui.css">
     <script src="http://code.jquery.com/jquery-1.10.2.js"></script>
     <script src="http://code.jquery.com/ui/1.11.4/jquery-ui.js"></script>
+    <link rel="stylesheet" type="text/css" href="board.css"/>
     <script type="text/javascript" src="common.js"></script>
     <script type="text/javascript" src="board.js"></script>
     <style type="text/css">
@@ -15,24 +15,31 @@
     </style>
   </head>
   <body>
-    
-    <form>
-      <div id="connectionStatus">
-	<div style="background-color:green;" class="ok">connection OK</div>
-	<div style="background-color:red;" class="ng">connection NG(please reload)</div>
-      </div>
-      <div><span id="caption"></span></div>
+
+    <div id="bar_white"></div><div id="bar_pink"></div>
+    <div id="main">
+      <form>
+   	<div id="connectionStatus">
+   	  <div class="ok"><p>Conecting :: OK</p></div>
+   	  <div class="ng"><p>Conectiong :: NG &gt;&gt;Please reload&lt;&lt;</p></div>
+   	</div>
+	<ul>
+	  <li><a id="modal-open" class="button-link">::QRcode::</a></li>
+	  <li><input class="button-link" id="reset" type="button" value="reset" /></li>
+	</ul>
+	<p class="txt_total">total</p>
+   	<p id="total"></p>
+      </form>
+    </div>
+
+    <!-- qr code dialog -->
+    <div id="modal-qr">
       <div id="reporterAddress"></div>
-      <div style="float:left;">
-	<img id="qr" src="" />
-      </div>
-      <div>
-	<input id="reset" type="button" value="reset" />
-      </div>
-      <div id="total" style="font-size:640px;"></div>
-    </form>
+      <img id="qr" src="" />
+      <p><a id="modal-close" class="button-link">...close</a></p>
+    </div>
 
-
+    <!-- create board dialog -->
     <div id="create-board-dialog" title="Create New Board">
       <p class="validateTips">All form fields are required.</p>
  
