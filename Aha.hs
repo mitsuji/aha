@@ -12,10 +12,10 @@ import Network.Wai.Handler.WebSockets (websocketsOr)
 import qualified Network.HTTP.Types as H
 import qualified Network.Wai.Parse as Parse
 import qualified Network.WebSockets as WS
-import Control.Concurrent (ThreadId,forkIO,threadDelay,killThread,MVar,newMVar,readMVar,modifyMVar,modifyMVar_)
+import Control.Concurrent (ThreadId,forkIO,threadDelay,MVar,newMVar,readMVar,modifyMVar,modifyMVar_)
 import Data.Typeable(Typeable)
-import Control.Exception (Exception,catch,throwIO,finally)
-import Control.Monad (forever, when)
+import Control.Exception (Exception,catch,throwIO,throwTo,finally)
+import Control.Monad (forever, when, void)
 import qualified Data.ByteString.Char8 as BS -- use for input 
 import qualified Data.ByteString.Lazy.Char8 as LBS -- use for output
 import qualified Data.Text as T
@@ -30,7 +30,7 @@ import Data.Aeson.Types(ToJSON,toJSON,object,(.=))
 import qualified Data.Aeson as AE
 import System.IO(withFile,IOMode(ReadMode,WriteMode))
 
-import System.Posix.Signals(installHandler,sigINT,sigTERM,Handler(..))
+import System.Posix.Signals(installHandler,sigINT,sigTERM,Handler(Catch))
 
 import Board
 import ServerState
@@ -48,25 +48,26 @@ main = do
   Warp.runSettings (
     Warp.setHost ( fromString host ) $
     Warp.setPort ( read port ) $
--- [TODO] shutdown correctly
---    Warp.setInstallShutdownHandler ( installShutdownHandler threadBackup ) $
+    Warp.setInstallShutdownHandler ( installShutdownHandler threadBackup ) $
     Warp.defaultSettings
     ) $ websocketsOr WS.defaultConnectionOptions (websocketApp vstate) (webApp vstate)
 
 
+data StopException = StopException deriving (Show,Typeable)
+instance Exception StopException
 
 
--- [TODO] shutdown correctly
+
 installShutdownHandler :: ThreadId -> IO() -> IO()
 installShutdownHandler threadBackup close = do
-  installHandler sigINT (CatchOnce shutdown) Nothing
-  installHandler sigTERM (CatchOnce shutdown) Nothing
-  putStrLn "installShutdownHandler"
+  void $ installHandler sigINT (Catch shutdown) Nothing
+  void $ installHandler sigTERM (Catch shutdown) Nothing
   where
     shutdown = do
       close
-      killThread threadBackup -- stop backup thead
-      putStrLn "shutdown"
+      throwTo threadBackup StopException
+
+
 
 -- [TODO] function name
 restore' :: MVar ServerState -> String -> IO()
@@ -80,13 +81,20 @@ restore' vstate path = do
       modifyMVar_ vstate $ \_ -> return state'
 
 backup ::  MVar ServerState -> String -> IO()
-backup vstate path = forever $ do
-  putStrLn "backup"
-  state <- readMVar vstate
-  items <- ServerState.dump state
-  withFile path WriteMode ( \h -> LBS.hPutStrLn h $ AE.encode items )
-  threadDelay $ 30 * 1000 * 1000
+backup vstate path =
+  -- [TODO] mask exception
+  loop `catch` onException
+  where
+    loop = do 
+      putStrLn "backup"
+      state <- readMVar vstate
+      items <- ServerState.dump state
+      withFile path WriteMode ( \h -> LBS.hPutStrLn h $ AE.encode items )
+      threadDelay $ 30 * 1000 * 1000
+      loop
 
+    onException :: StopException -> IO ()
+    onException e = return ()
 
 
 
@@ -134,6 +142,10 @@ instance ToJSON Response where
            ]
 
 
+contentTypeJsonHeader :: H.Header
+contentTypeJsonHeader = ("Content-Type","application/json")
+
+
 webApp :: MVar ServerState -> Wai.Application
 webApp vstate req respond
   | (["add_board"]    == path) = (addBoardProc    vstate req respond) `catch` onError
@@ -157,10 +169,6 @@ staticApp = Static.staticApp $ settings { Static.ssIndices = indices }
   where
     settings = Static.embeddedSettings $(embedDir "static") -- embed contents as ByteString
     indices = fromJust $ toPieces ["board.html"] -- default content
-
-
-contentTypeJsonHeader :: H.Header
-contentTypeJsonHeader = ("Content-Type","application/json")
 
 
 addBoardProc :: MVar ServerState -> Wai.Application
