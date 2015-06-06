@@ -58,11 +58,9 @@ addBoard :: ServerState -> BoardSecretKey -> BoardPublicKey -> MVar Board.Board 
 addBoard ss bsk bpk vboard
   | not $ isValidSecretKey bsk = Left BoardSecretKeyInvalid
   | not $ isValidPublicKey bpk = Left BoardPublicKeyInvalid
-  | otherwise = case Map.member bsk srs of
-    True -> Left BoardSecretKeyDuplicated
-    False -> case Map.member bpk bds of
-      True -> Left BoardPublicKeyDuplicated
-      False ->  Right $ ServerState $ ServerStateImp srs' bds'
+  | Map.member bsk srs = Left BoardSecretKeyDuplicated
+  | Map.member bpk bds = Left BoardPublicKeyDuplicated
+  | otherwise = Right $ ServerState $ ServerStateImp srs' bds'
   where
     isValidSecretKey cand = True -- must be UUID
     isValidPublicKey cand = (all (\c -> elem c "abcdefghijklmnopqrstuvwxyz0123456789") cand)
