@@ -8,17 +8,17 @@ module Board (
   Error(..),
   new,
   caption,
-  connection,
-  setConnection,
-  closeConnection,
+  viewerConnections,
+  addViewerConnection,
+  delViewerConnection,
   aha,
   reset,
-  reporterConnections,
   hasReporter,
   addReporter,
-  reporterConnection,
-  setReporterConnection,
-  closeReporterConnection,
+  allReporterConnections,
+  reporterConnections,
+  addReporterConnection,
+  delReporterConnection,
   reporterAha,
   incrementReporterAha,
   ) where
@@ -32,31 +32,31 @@ import Data.Functor ((<$>))
 import Control.Applicative (pure,(<*>))
 import Control.Monad(mzero)
 
+import Data.List(concatMap)
+import qualified AutoMap as AutoMap
 
-
-
+type ConnectionKey = AutoMap.Key
 type Caption = String
 type ReporterKey = String
 type Aha = Int
 type TotalAha = Int
 
-data Reporter = Reporter {
-  dReporterConnection :: Maybe WS.Connection,
+data ReporterImp = ReporterImp {
+  dReporterConnections :: AutoMap.AutoMap WS.Connection,
   dReporterAha :: Aha
   }
                 
 data BoardImp = BoardImp {
   dBoardCaption :: Caption,
-  dBoardConnection :: Maybe WS.Connection,
-  dBoardReporters :: Map.Map ReporterKey Reporter
+  dBoardViewerConnections :: AutoMap.AutoMap WS.Connection,
+  dBoardReporters :: Map.Map ReporterKey ReporterImp
   }
 
-newtype Board = Board { unBoard :: BoardImp }
+newtype Board = Board BoardImp
 
 data Error = CaptionInvalid
            | ReporterKeyDuplicated
            | ReporterNotFound
-           | ActiveConnectionExists
            deriving(Show)
 
 
@@ -65,61 +65,60 @@ data Error = CaptionInvalid
 new :: Caption -> Either Error Board
 new c
   | not $ isValidCaption c = Left CaptionInvalid
-  | otherwise              = Right $ Board $ BoardImp c Nothing Map.empty
+  | otherwise              = Right $ Board $ BoardImp c AutoMap.empty Map.empty
   where
     isValidCaption cand = 0 < length cand && length cand <= 20
 
 
 caption :: Board -> Caption
-caption b = dBoardCaption $ unBoard b 
+caption (Board bi) = dBoardCaption bi
 
 
-connection :: Board -> Maybe WS.Connection
-connection b = dBoardConnection $ unBoard b
+viewerConnections :: Board -> [WS.Connection]
+viewerConnections (Board bi) = AutoMap.elems $ dBoardViewerConnections bi
 
 
-setConnection :: Board -> WS.Connection -> Either Error Board
-setConnection b conn = case isJust $ connection b of
-  True  -> Left ActiveConnectionExists
-  False -> Right $ Board $ (unBoard b) { dBoardConnection = Just conn } 
+addViewerConnection :: Board -> WS.Connection -> (Board,ConnectionKey)
+addViewerConnection (Board bi) conn =
+  (Board $ bi { dBoardViewerConnections = m' }, k') 
+  where
+    (m',k') = AutoMap.insert conn (dBoardViewerConnections bi)
 
 
-closeConnection :: Board -> Board
-closeConnection b = Board $ (unBoard b) { dBoardConnection = Nothing } 
+delViewerConnection :: Board -> ConnectionKey -> Board
+delViewerConnection (Board bi) k =
+  Board $ bi { dBoardViewerConnections = m' } 
+  where
+    m' = AutoMap.delete k (dBoardViewerConnections bi)
+
+
 
 
 aha :: Board -> TotalAha
-aha b = Map.foldl' (\acc r -> acc + (dReporterAha r)) 0 (dBoardReporters $ unBoard b)
+aha (Board bi) = Map.foldl' (\acc r -> acc + (dReporterAha r)) 0 (dBoardReporters bi)
 
 
 reset :: Board -> Board
-reset b = Board $ bi { dBoardReporters = rs' }
+reset (Board bi) = Board $ bi { dBoardReporters = rs' }
   where
     rs' = Map.map (\r -> r { dReporterAha = 0 }) (dBoardReporters bi)
-    bi = unBoard b
-
-
-reporterConnections :: Board -> [WS.Connection]
-reporterConnections b = catMaybes
-                        $ map dReporterConnection $ Map.elems (dBoardReporters $ unBoard b)
 
 
 
 
-reporter' :: Board -> ReporterKey -> Either Error Reporter
-reporter' b rk = case Map.lookup rk (dBoardReporters $ unBoard b) of
+reporter' :: Board -> ReporterKey -> Either Error ReporterImp
+reporter' (Board bi) rk = case Map.lookup rk (dBoardReporters bi) of
   Nothing -> Left ReporterNotFound
   Just r -> Right r
 
 
-insertReporter' :: Board -> ReporterKey -> Reporter -> Board
-insertReporter' b rk r = Board $ bi { dBoardReporters = rs' }
+insertReporter' :: Board -> ReporterKey -> ReporterImp -> Board
+insertReporter' (Board bi) rk r = Board $ bi { dBoardReporters = rs' }
   where
     rs' = Map.insert rk r (dBoardReporters bi)
-    bi = unBoard b
 
 
-updateReporter' :: Board -> ReporterKey -> (Reporter -> Reporter) -> Either Error Board
+updateReporter' :: Board -> ReporterKey -> (ReporterImp -> ReporterImp) -> Either Error Board
 updateReporter' b rk f = 
   (\r -> insertReporter' b rk (f r)) <$> reporter' b rk 
 
@@ -127,31 +126,42 @@ updateReporter' b rk f =
 
 
 hasReporter :: Board -> ReporterKey -> Bool
-hasReporter b rk = Map.member rk (dBoardReporters $ unBoard b)
+hasReporter (Board bi) rk = Map.member rk (dBoardReporters bi)
 
 
 addReporter :: Board -> ReporterKey -> Either Error Board
 addReporter b rk = case hasReporter b rk of
   True  -> Left ReporterKeyDuplicated
-  False -> Right $ insertReporter' b rk (Reporter Nothing 0)
+  False -> Right $ insertReporter' b rk (ReporterImp AutoMap.empty 0)
 
 
-reporterConnection :: Board -> ReporterKey -> Either Error (Maybe WS.Connection)
-reporterConnection b rk = dReporterConnection <$> reporter' b rk
-
-  
-setReporterConnection :: Board -> ReporterKey -> WS.Connection -> Either Error Board
-setReporterConnection b rk conn = do
-  hasConn <- isJust <$> reporterConnection b rk
-  case hasConn of
-    True  -> Left ActiveConnectionExists
-    False -> updateReporter' b rk (\r -> r { dReporterConnection = Just conn })
 
 
-closeReporterConnection :: Board -> ReporterKey -> Either Error Board
-closeReporterConnection b rk =
-  updateReporter' b rk (\r -> r { dReporterConnection = Nothing })
-         
+
+
+allReporterConnections :: Board -> [WS.Connection]
+allReporterConnections (Board bi) = concatMap
+                           ( AutoMap.elems . dReporterConnections ) $ Map.elems (dBoardReporters bi)
+
+reporterConnections :: Board -> ReporterKey -> Either Error [WS.Connection]
+reporterConnections b rk = (AutoMap.elems . dReporterConnections) <$> reporter' b rk
+
+
+addReporterConnection :: Board -> ReporterKey -> WS.Connection -> Either Error (Board, ConnectionKey)
+addReporterConnection b rk conn = do
+  r <- reporter' b rk
+  let (m',k') = AutoMap.insert conn (dReporterConnections r)
+  let b' = insertReporter' b rk (r { dReporterConnections = m' })
+  return (b',k')
+
+
+
+delReporterConnection :: Board -> ReporterKey -> ConnectionKey -> Either Error Board
+delReporterConnection b rk ck = 
+  updateReporter' b rk (\r -> r { dReporterConnections = AutoMap.delete ck (dReporterConnections r) })
+
+
+
 
 reporterAha :: Board -> ReporterKey -> Either Error Aha
 reporterAha b rk = dReporterAha <$> reporter' b rk
@@ -159,19 +169,19 @@ reporterAha b rk = dReporterAha <$> reporter' b rk
 
 incrementReporterAha :: Board -> ReporterKey -> Either Error (Board, Aha, TotalAha)
 incrementReporterAha b rk = do
-  b'   <- updateReporter' b rk (\r -> r { dReporterAha = (dReporterAha r) +1 })
+  b' <- updateReporter' b rk (\r -> r { dReporterAha = (dReporterAha r) +1 })
   aha' <- reporterAha b' rk
   return (b', aha', aha b')
 
 
 
 
-instance ToJSON Reporter where
-  toJSON (Reporter _ aha) =
+instance ToJSON ReporterImp where
+  toJSON (ReporterImp _ aha) =
     object ["aha" .= aha]
 
-instance FromJSON Reporter where
-  parseJSON (Object v) = Reporter <$> pure Nothing <*> v .: "aha"
+instance FromJSON ReporterImp where
+  parseJSON (Object v) = ReporterImp <$> pure AutoMap.empty <*> v .: "aha"
   parseJSON _ = mzero
 
 
@@ -182,7 +192,7 @@ instance ToJSON BoardImp where
            ]
     
 instance FromJSON BoardImp where
-  parseJSON (Object v) = BoardImp <$> v .: "caption" <*> pure Nothing <*> v .: "reporters"
+  parseJSON (Object v) = BoardImp <$> v .: "caption" <*> pure AutoMap.empty <*> v .: "reporters"
   parseJSON _ = mzero
     
 

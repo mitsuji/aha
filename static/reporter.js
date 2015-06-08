@@ -28,72 +28,29 @@ $(document).ready(function () {
     //
     if( boardPublicKey != null ) {
 
+	console.log('boardPublicKey: ' + boardPublicKey );
 	console.log('localStorage: rk: ' + localStorage.getItem('rk:' + boardPublicKey));
-	
-	if(localStorage.getItem('rk:' + boardPublicKey) != null) {
-	    resume(boardPublicKey);
-	} else {
-	    create(boardPublicKey);
-	}
+
+	connect(boardPublicKey);
 	
     }
-
-    
-    function resume( boardPublicKey ) {
-	$.post(
-	    'http://' + location.host + '/get_reporter',
-	    {board_public_key: boardPublicKey, reporter_key: localStorage.getItem('rk:' + boardPublicKey)},
-	    function (data){
-		if(data.success) {
-		    localStorage.setItem('rk:' + data.content.board_public_key, data.content.reporter_key)
-		    connect(data.content);
-		} else {
-		    switch(data.error_code) {
-		    case 10001:
-		    case 10002:
-			alert('error: ' + data.error_code + ': ' + data.message);
-			break;
-		    default:
-			create(boardPublicKey);
-			break;
-		    }
-		}
-	    },
-	    'json'
-	);
-    }
-
-    
-    function create( boardPublicKey ) {
-	$.post(
-	    'http://' + location.host + '/add_reporter',
-	    {board_public_key: boardPublicKey},
-	    function (data){
-		if(data.success) {
-		    localStorage.setItem('rk:' + data.content.board_public_key, data.content.reporter_key)
-		    connect(data.content);
-		} else {
-		    alert('error: ' + data.error_code + ': ' + data.message);
-		}
-	    },
-	    'json'
-	);
-    }
     
 
-    function connect( content ) {
-	console.log(content);
+    function connect( boardPublicKey ) {
 
 	//
 	// WebSocketクライアントの実装
 	//
-	var ws = webSocketUtil.webSocket('/reporter?board_public_key=' + content.board_public_key + '&reporter_key=' + content.reporter_key);
+
+	var wsurl = '/reporter?board_public_key=' + boardPublicKey;
+	if( localStorage.getItem('rk:' + boardPublicKey) != null)
+	{
+	    wsurl += '&reporter_key=' + localStorage.getItem('rk:' + boardPublicKey);
+	}
 	
+	var ws = webSocketUtil.webSocket( wsurl );
 	ws.onopen = function() {
 	    setConnect(true);
-	    setCaption(content.board_caption)
-	    setTotal(content.board_total_aha)
-	    setAha(content.aha)
 	};
 	
 	ws.onclose = function(event) {
@@ -102,8 +59,11 @@ $(document).ready(function () {
     
 	ws.onmessage = function(event) {
 	    console.log('onmessage: ' + event.data );
-	    eval ('var json = ' + event.data + ';' ); // [TODO] must be danger
-	    if(json.type == 'aha') {
+	    var json = JSON.parse(event.data);
+	    if(json.type == 'reporter') {
+		localStorage.setItem('rk:' + json.content.board_public_key, json.content.reporter_key)
+		setCaption(json.content.board_caption)
+	    } else if(json.type == 'aha') {
 		setAha(json.content);
 	    } else if(json.type == 'total_aha') {
 		setTotal(json.content);
@@ -117,14 +77,15 @@ $(document).ready(function () {
 	//
 	// AHAボタン押下
 	//
-	$('#aha')[0].addEventListener('touchend',function(e){
-            ws.send('aha');
-	},false);
-	
-//	$('#aha').click(function(e){
-//            ws.send('aha');
-//	});
-
+	if ( 'ontouchend' in window ) {
+	    $('#aha')[0].addEventListener('touchend',function(e){
+		ws.send('aha');
+	    },false);
+	} else {
+	    $('#aha').click(function(e){
+		ws.send('aha');
+	    });
+	}
     }
 
     
