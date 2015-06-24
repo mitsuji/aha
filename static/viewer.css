@@ -73,13 +73,16 @@ body{
 }
 ul{
 	letter-spacing: -.40em;
+        text-align: right;
 }
 li {
-	display: inline-block;
-	letter-spacing: normal;
+   display: inline-block;
+   zoom:1 // IE7以下
+   letter-spacing: normal;
    text-align: center;
    margin:10px;
    line-height: 60px;
+   
 }
 
 
@@ -92,7 +95,7 @@ form ul li a{
 	display: inline-block;
 	letter-spacing: normal;
 	width: 96px;
-   height: 56px;
+        height: 56px;
    background-color: #f035cf;
 	border:solid 2px #ffe037;
 	text-transform:uppercase;
@@ -132,10 +135,17 @@ form ul li input[type=button]{
 	z-index:1;
 }
 #main p#total{
-	font-size: 500px;
+	font-size: 600px;
 	line-height:  90%;
+        text-align: right;
 }
 
 .txt_total{
 	font-size:80px;
+}
+
+.li_graph{
+   /*
+   display: none;
+   */
 }

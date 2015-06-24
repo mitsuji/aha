@@ -58,6 +58,11 @@ $(document).ready(function () {
 		setQr(json.content.public_key);
 	    } else if(json.type == 'total_aha') {
 		setTotal(json.content);
+
+		/* samantha */
+		g_total=json.content;
+		/* samantha */
+		
 	    } else if(json.type == 'reset') {
 		setTotal('0');
 	    }
@@ -169,7 +174,37 @@ $(window).load(function(){
 		} ) ;
     	
     });
+
+    //
+    // グラフ描画
+    //
+    var smoothie = new SmoothieChart({	//グラフの形の指定
+      grid: { strokeStyle:'rgb(125, 0, 0)', fillStyle:'rgb(60, 0, 0)',
+	      lineWidth: 1, millisPerLine: 250, verticalSections: 6, },
+      labels: { fillStyle:'rgb(60, 0, 0)' }
+    });
+    smoothie.streamTo(document.getElementById("ahagraph"),1000);
+    
+    var line1 = new TimeSeries();
+    setInterval(function() {	// １秒毎に描画
+	var total = g_total - g_total_old;
+	if(total<0) total=0 ;
+	g_total_old =  g_total;
+	line1.append(new Date().getTime(),total);
+    }, 1000);
+    
+    
+    // Add to SmoothieChart
+    smoothie.addTimeSeries(line1,{ strokeStyle:'rgb(255, 0, 255)', fillStyle:'rgba(255, 0, 255, 0.3)', lineWidth:3 });
+    
 });
+
+//
+//　グラフ用に覚えておく変数
+//
+var g_total=0; /* グローバル変数 */
+var g_total_old=0; /* グローバル変数 */
+
 
 //
 //リサイズされた時のモーダルウィンドウの位置
