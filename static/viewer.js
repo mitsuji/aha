@@ -1,5 +1,5 @@
 //
-// board.html 用 UIコントローラ
+// viewer.html 用 UIコントローラ
 //
 $(document).ready(function () {
 
@@ -10,129 +10,39 @@ $(document).ready(function () {
     setCaption('');
     setTotal('0');
 
-    //
-    // dialog object (Singleton)
-    //
-    var boardDialog = function( fOnSubmit ) {
-
-	var canClose;
-	var divElem = $('#create-board-dialog');
-	
-	divElem.dialog({
-	    autoOpen: false,
-	    height: 400,
-	    width: 400,
-	    modal: true,
-	    buttons: {
-		'Create a Board': submit
-	    },
-	    beforeClose: function(event) {
-		if(!canClose) {
-		    event.preventDefault();
-		}
-	    }
-	});
     
-	divElem.find('form').on('submit', function( event ) {
-	    event.preventDefault();
-	    submit();
-	});
-
-	function submit() {
-	    // validation
-	    var publicKey = $('#newPublicKey').val();
-	    var caption   = $('#newCaption').val(); 
-	    fOnSubmit(publicKey,caption);
+    var boardPublicKey = function() {
+	var url = location.href;
+	var posQuery = url.indexOf('?');
+	if( posQuery >= 0 ) {
+	    return url.substr( posQuery +1 );
+	} else {
+	    return null;
 	}
+    }();
 
-	//
-	// public methods
-	//
-	return {
-	    open: function () {
-		divElem.dialog('open');
-		canClose = false;
-	    },
-	    close: function () {
-		canClose = true;
-		divElem.dialog('close');
-	    }
-	};
+
+    //
+    // boarderPublicKey が指定されていないときは何もしない
+    //
+    if( boardPublicKey != null ) {
+
+	console.log('boardPublicKey: ' + boardPublicKey );
+
+	connect(boardPublicKey);
 	
-    }(onCreate);
-
-
-    
-    console.log('localStorage: bk: ' + localStorage.getItem('bk'));
-    
-    if(localStorage.getItem('bk') != null) {
-	resume();
-    } else {
-	create();
     }
 
     
-    function resume() {
-	$.post(
-	    'http://' + location.host + '/get_board',
-	    {secret_key: localStorage.getItem('bk')},
-	    function (data){
-		if(data.success) {
-		    localStorage.setItem('bk',data.content.secret_key);
-		    connect(data.content);
-		} else {
-		    switch(data.error_code) {
-		    case 10001:
-			alert('error: ' + data.error_code + ': ' + data.message);
-			break;
-		    default:
-			create();
-			break;
-		    }
-		}
-	    },
-	    'json'
-	);
-    }
-    
-
-
-    function create() {
-	boardDialog.open();
-    }
-    
-    function onCreate( publicKey, caption ) {
-	$.post(
-	    'http://' + location.host + '/add_board',
-	    {public_key: publicKey, caption: caption},
-	    function (data){
-		if(data.success) {
-		    boardDialog.close();
-		    localStorage.setItem('bk',data.content.secret_key);
-		    connect(data.content);
-		} else {
-		    alert('error: ' + data.error_code + ': ' + data.message);
-		}
-	    },
-	    'json'
-	);
-    }
-
-    
-    function connect( content ) {
-	console.log(content);
+    function connect( boardPublicKey ) {
 
 	//
 	// WebSocketクライアントの実装
 	//
-	var ws = webSocketUtil.webSocket('/board?secret_key=' + content.secret_key);
+	var ws = webSocketUtil.webSocket('/viewer?public_key=' + boardPublicKey);
 	
 	ws.onopen = function() {
 	    setConnect(true);
-	    setCaption(content.caption);
-	    setTotal(content.total_aha);
-	    setReporterAddress(content.public_key);
-	    setQr(content.public_key);
 	};
 	
 	ws.onclose = function(event) {
@@ -141,9 +51,18 @@ $(document).ready(function () {
 	
 	ws.onmessage = function(event) {
 	    console.log('onmessage: ' + event.data);
-	    eval ("var json = " + event.data + ";" ); // [TODO] must be danger
-	    if(json.type == 'total_aha') {
+	    var json = JSON.parse(event.data);
+	    if(json.type == 'board') {
+		setCaption(json.content.caption);
+		setReporterAddress(json.content.public_key);
+		setQr(json.content.public_key);
+	    } else if(json.type == 'total_aha') {
 		setTotal(json.content);
+
+		/* samantha */
+		g_total=json.content;
+		/* samantha */
+		
 	    } else if(json.type == 'reset') {
 		setTotal('0');
 	    }
@@ -154,7 +73,33 @@ $(document).ready(function () {
 	// リセットボタン押下
 	//
 	$('#reset').click(function () {
-            ws.send('reset');
+
+	    var boardKeys;
+	    if(localStorage.getItem('boardKeys') != null){
+		boardKeys = JSON.parse(localStorage.getItem('boardKeys'));
+	    } else {
+		boardKeys = {};
+	    }
+
+	    if(boardKeys.hasOwnProperty(boardPublicKey)) {
+		$.post(
+		    'http://' + location.host + '/reset_board',
+		    {secret_key: boardKeys[boardPublicKey]},
+		    function (data){
+			if(data.success) {
+			    // ok
+			} else {
+			    alert('error: ' + data.error_code + ': ' + data.message);
+			}
+		    },
+		    'json'
+		);
+	    }else{
+		alert('reset not permitted...')
+	    }
+	    
+
+
 	});
 	
     }
@@ -229,7 +174,37 @@ $(window).load(function(){
 		} ) ;
     	
     });
+
+    //
+    // グラフ描画
+    //
+    var smoothie = new SmoothieChart({	//グラフの形の指定
+      grid: { strokeStyle:'rgb(125, 0, 0)', fillStyle:'rgb(60, 0, 0)',
+	      lineWidth: 1, millisPerLine: 250, verticalSections: 6, },
+      labels: { fillStyle:'rgb(60, 0, 0)' }
+    });
+    smoothie.streamTo(document.getElementById("ahagraph"),1000);
+    
+    var line1 = new TimeSeries();
+    setInterval(function() {	// １秒毎に描画
+	var total = g_total - g_total_old;
+	if(total<0) total=0 ;
+	g_total_old =  g_total;
+	line1.append(new Date().getTime(),total);
+    }, 1000);
+    
+    
+    // Add to SmoothieChart
+    smoothie.addTimeSeries(line1,{ strokeStyle:'rgb(255, 0, 255)', fillStyle:'rgba(255, 0, 255, 0.3)', lineWidth:3 });
+    
 });
+
+//
+//　グラフ用に覚えておく変数
+//
+var g_total=0; /* グローバル変数 */
+var g_total_old=0; /* グローバル変数 */
+
 
 //
 //リサイズされた時のモーダルウィンドウの位置

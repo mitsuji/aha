@@ -39,7 +39,7 @@ data ServerStateImp = ServerStateImp {
   boards :: Map.Map BoardPublicKey (MVar Board.Board)
   }
 
-newtype ServerState = ServerState { unServerState :: ServerStateImp }
+newtype ServerState = ServerState ServerStateImp
 
 data Error = BoardSecretKeyDuplicated
            | BoardPublicKeyDuplicated
@@ -55,7 +55,7 @@ new = ServerState $ ServerStateImp Map.empty Map.empty
 
 
 addBoard :: ServerState -> BoardSecretKey -> BoardPublicKey -> MVar Board.Board -> Either Error ServerState
-addBoard ss bsk bpk vboard
+addBoard (ServerState ssi) bsk bpk vboard
   | not $ isValidSecretKey bsk = Left BoardSecretKeyInvalid
   | not $ isValidPublicKey bpk = Left BoardPublicKeyInvalid
   | Map.member bsk srs = Left BoardSecretKeyDuplicated
@@ -69,15 +69,14 @@ addBoard ss bsk bpk vboard
     bds' = Map.insert bpk vboard bds
     srs = secrets ssi
     bds = boards ssi
-    ssi = unServerState ss
 
 
 boardFromPublicKey :: ServerState -> BoardPublicKey -> Maybe (MVar Board.Board)
-boardFromPublicKey ss bpk = Map.lookup bpk (boards $ unServerState ss)
+boardFromPublicKey (ServerState ssi) bpk = Map.lookup bpk (boards ssi)
 
 
 publicKeyFromSecretKey :: ServerState -> BoardSecretKey -> Maybe BoardPublicKey
-publicKeyFromSecretKey ss bsk = Map.lookup bsk (secrets $ unServerState ss)
+publicKeyFromSecretKey (ServerState ssi) bsk = Map.lookup bsk (secrets ssi)
 
 
 
@@ -97,13 +96,12 @@ instance FromJSON Item where
 
 
 dump :: ServerState -> IO [Item]
-dump ss = forM srs $ \(sk, pk) -> do
+dump (ServerState ssi) = forM srs $ \(sk, pk) -> do
   board <- readMVar $ fromJust $ Map.lookup pk bds
   return $ Item sk pk board
   where
     srs = Map.toList $ secrets ssi
     bds = boards ssi
-    ssi = unServerState ss
 
 restore :: [Item] -> IO ServerState
 restore items = foldM restore' ServerState.new items

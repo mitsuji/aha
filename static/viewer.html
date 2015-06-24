@@ -1,18 +1,14 @@
 <html>
   <head>
     <meta content="text/html" charset="UTF-8"/> 
-    <title>AHA :: Board</title>
+    <title>AHA :: Viewer</title>
     <link rel="stylesheet" href="http://code.jquery.com/ui/1.11.4/themes/smoothness/jquery-ui.css">
     <script src="http://code.jquery.com/jquery-1.10.2.js"></script>
     <script src="http://code.jquery.com/ui/1.11.4/jquery-ui.js"></script>
-    <link rel="stylesheet" type="text/css" href="board.css"/>
+    <script type="text/javascript" src="smoothie.js"></script>
+    <link rel="stylesheet" type="text/css" href="viewer.css"/>
     <script type="text/javascript" src="common.js"></script>
-    <script type="text/javascript" src="board.js"></script>
-    <style type="text/css">
-      fieldset { padding:0; border:0; margin-top:25px; }
-      label, input { display:block; }
-      input.text { margin-bottom:12px; width:95%; padding: .4em; }
-    </style>
+    <script type="text/javascript" src="viewer.js"></script>
   </head>
   <body>
 
@@ -27,6 +23,7 @@
 	<ul>
 	  <li><a id="modal-open" class="button-link">::QRcode::</a></li>
 	  <li><input class="button-link" id="reset" type="button" value="reset" /></li>
+	  <li class="li_graph"><canvas id="ahagraph" width="800" height="120"></canvas></li>
 	</ul>
 	<p class="txt_total">total</p>
    	<p id="total"></p>
@@ -38,23 +35,6 @@
       <div id="reporterAddress"></div>
       <img id="qr" src="" />
       <p><a id="modal-close" class="button-link">...close</a></p>
-    </div>
-
-    <!-- create board dialog -->
-    <div id="create-board-dialog" title="Create New Board">
-      <p class="validateTips">All form fields are required.</p>
- 
-      <form>
-	<fieldset>
-	  <label for="newPublicKey">publicKey</label>
-	  <input type="text" name="newPublicKey" id="newPublicKey" value="" class="text ui-widget-content ui-corner-all">
-	  <label for="newCaption">caption</label>
-	  <input type="text" name="newCaption" id="newCaption" value="" class="text ui-widget-content ui-corner-all">
-	  
-	  <!-- Allow form submission with keyboard without duplicating the dialog button -->
-	  <input type="submit" tabindex="-1" style="position:absolute; top:-1000px">
-	</fieldset>
-      </form>
     </div>
     
   </body>
