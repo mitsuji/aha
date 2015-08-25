@@ -1,20 +1,41 @@
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE PackageImports #-}
 
-import qualified Data.Map as Map
-import qualified Control.Concurrent.STM as STM
+import Data.String(fromString)
+import System.Environment (getArgs)
+import qualified Network.Wai.Handler.Warp as Warp
+import qualified Network.Wai as Wai
+import qualified Network.Wai.Application.Static as Static
+import Data.FileEmbed (embedDir)
+import WaiAppStatic.Types (toPieces)
+import Network.Wai.Handler.WebSockets (websocketsOr)
+import qualified Network.HTTP.Types as H
+import qualified Network.Wai.Parse as Parse
 import qualified Network.WebSockets as WS
+import Control.Concurrent (ThreadId,forkIO,threadDelay,MVar,newMVar,readMVar,modifyMVar,modifyMVar_)
+import Data.Typeable(Typeable)
+import Control.Exception (Exception,catch,throwIO,throwTo,finally)
+import Control.Monad (forever, void)
+import qualified Data.ByteString.Char8 as BS -- use for input 
+import qualified Data.ByteString.Lazy.Char8 as LBS -- use for output
+import qualified Data.Text as T
+import Data.Text.Encoding (decodeUtf8)
+import qualified Data.Map as Map
+import Data.Maybe (fromJust)
+import Network.HTTP.Types.URI (parseSimpleQuery)
+import Data.UUID.V1 (nextUUID)
+import qualified Data.UUID as UUID
 
 import Data.Aeson.Types(ToJSON,toJSON,object,(.=))
 import qualified Data.Aeson as AE
-import Control.Monad(when)
-import "mtl" Control.Monad.Trans(lift)
+import System.IO(withFile,IOMode(ReadMode,WriteMode))
 
-import Data.Maybe(fromJust,isJust)
+import System.Posix.Signals(installHandler,sigINT,sigTERM,Handler(Catch))
 
-import Data.UUID.V1 (nextUUID)
-import qualified Data.UUID as UUID
+import qualified Control.Concurrent.STM as STM
+
 
 
 type ConnKey = Int
@@ -49,7 +70,8 @@ type ViewerKey = Int
 type ReporterKey = String
 
 data Board = Board
-  { boardPublicKey     :: BoardPublicKey
+  { boardSecretKey     :: BoardSecretKey
+  , boardPublicKey     :: BoardPublicKey
   , boardCaption       :: Caption
   , boardAha           :: STM.TVar Int
   , boardNextViewerKey :: STM.TVar ViewerKey
@@ -58,14 +80,15 @@ data Board = Board
   , boardChan          :: STM.TChan Message
   }
 
-newBoard :: BoardPublicKey -> Caption -> STM.STM Board
-newBoard bpk caption = do
+newBoard :: BoardSecretKey -> BoardPublicKey -> Caption -> STM.STM Board
+newBoard bsk bpk caption = do
   aha       <- STM.newTVar 0
   nvk       <- STM.newTVar 0
   viewers   <- STM.newTVar Map.empty
   reporters <- STM.newTVar Map.empty
   chan      <- STM.newBroadcastTChan 
-  return Board { boardPublicKey     = bpk
+  return Board { boardSecretKey     = bsk
+               , boardPublicKey     = bpk
                , boardCaption       = caption
                , boardAha           = aha
                , boardNextViewerKey = nvk
@@ -161,7 +184,7 @@ addBoard Server{..} caption bsk bpk = do
     else if Map.member bsk keys
          then return $ Left BoardSecretKeyDuplicated
          else do
-           board <- newBoard bpk caption
+           board <- newBoard bsk bpk caption
            STM.writeTVar serverBoards    $ Map.insert bpk board boards
            STM.writeTVar serverBoardKeys $ Map.insert bsk bpk keys
            return $ Right board
@@ -266,3 +289,177 @@ connectViewer = undefined
 
 disconnectViewer :: Board -> ViewerKey -> STM.STM ()
 disconnectViewer = undefined
+
+
+
+
+
+
+
+
+
+
+
+
+
+main :: IO ()
+main = do
+  host:port:backupPath:_ <- getArgs
+  server <- newServer
+  Warp.runSettings (
+    Warp.setHost (fromString host) $
+    Warp.setPort (read port) $
+    Warp.defaultSettings
+    ) $ websocketsOr WS.defaultConnectionOptions (websocketApp server) (plainOldHttpApp server)
+
+  
+
+
+type ErrorCode = Int
+type ErrorMessage = String
+
+data AhaException = AhaException ErrorCode ErrorMessage deriving (Show,Typeable)
+instance Exception AhaException
+
+throwError :: ErrorCode -> ErrorMessage -> IO a
+throwError code msg = throwIO $ AhaException code msg
+
+
+
+
+data Response = ResponseError ErrorCode ErrorMessage
+              | ResponseBoard BoardSecretKey BoardPublicKey Caption
+              | ResponseReset
+              deriving (Show)
+
+instance ToJSON Response where
+  toJSON (ResponseError code msg) =
+    object ["success"    .= False
+           ,"error_code" .= code
+           ,"message"    .= msg
+           ]
+  toJSON (ResponseBoard sk pk ca) =
+    object ["success" .= True
+           ,"type"    .= ("board" :: String)
+           ,"content" .= object ["secret_key" .= sk
+                                ,"public_key" .= pk
+                                ,"caption"    .= ca
+                                ]
+           ]
+  toJSON (ResponseReset) =
+    object ["success" .= True
+           ,"type"    .= ("reset" :: String)
+           ,"content" .= ("ok" :: String)
+           ]
+
+
+contentTypeJsonHeader :: H.Header
+contentTypeJsonHeader = ("Content-Type","application/json")
+
+
+plainOldHttpApp :: Server -> Wai.Application
+plainOldHttpApp server req respond
+  | (["reset_board"]  == path) = (resetBoardProc  server req respond) `catch` onError
+  | (["add_board"]    == path) = (addBoardProc    server req respond) `catch` onError
+  | (["get_board"]    == path) = (getBoardProc    server req respond) `catch` onError
+  | otherwise = staticHttpApp req respond -- static html/js/css files
+  where
+    path = Wai.pathInfo req
+
+    onError :: AhaException -> IO Wai.ResponseReceived
+    onError e@(AhaException code msg) =
+      respond $ Wai.responseLBS
+      H.status200
+      [contentTypeJsonHeader]
+      (AE.encode $ ResponseError code msg)
+
+
+staticHttpApp :: Wai.Application
+staticHttpApp = Static.staticApp $ settings { Static.ssIndices = indices }
+  where
+    settings = Static.embeddedSettings $(embedDir "static") -- embed contents as ByteString
+    indices = fromJust $ toPieces ["admin.html"] -- default content
+
+
+resetBoardProc :: Server -> Wai.Application
+resetBoardProc server req respond = do
+  (params, _) <- Parse.parseRequestBody Parse.lbsBackEnd req -- parse post parameters
+
+  secretKey <- case Map.lookup "secret_key" $ Map.fromList params of
+    Nothing -> throwError 10001 "\"secret_key\" is not specified"
+    Just sk -> return $ T.unpack $ decodeUtf8 sk
+
+  STM.atomically $ do
+    mboard <- getBoard server secretKey
+    case mboard of
+      Nothing -> return () -- [TODO] throwError
+      Just board -> resetBoard board
+  
+  respond $ Wai.responseLBS
+    H.status200
+    [contentTypeJsonHeader]
+    ( AE.encode $ ResponseReset )
+
+
+
+
+addBoardProc :: Server -> Wai.Application
+addBoardProc server req respond = do
+  (params, _) <- Parse.parseRequestBody Parse.lbsBackEnd req -- parse post parameters
+
+  publicKey <- case Map.lookup "public_key" $ Map.fromList params of
+    Nothing -> throwError 10002 "\"public_key\" is not specified"
+    Just pk -> return $ T.unpack $ decodeUtf8 pk
+
+  caption <- case Map.lookup "caption" $ Map.fromList params of
+    Nothing -> throwError 10003 "\"caption\" is not specified"
+    Just ca -> return $ T.unpack $ decodeUtf8 ca
+
+  eboard <- addBoardIO server caption publicKey
+  board <- case eboard of
+    Left err@BoardCaptionInvalid      -> throwError 10004 ("addBoardIO failed: " ++ (show err))
+    Left err@BoardSecretKeyDuplicated -> throwError 10005 ("addBoardIO failed: " ++ (show err))
+    Left err@BoardPublicKeyDuplicated -> throwError 10006 ("addBoardIO failed: " ++ (show err))
+    Left err@BoardSecretKeyInvalid    -> throwError 10007 ("addBoardIO failed: " ++ (show err))
+    Left err@BoardPublicKeyInvalid    -> throwError 10008 ("addBoardIO failed: " ++ (show err))
+    Right board -> return board
+
+      
+  putStrLn $ "ServerState.addBoard: secretKey: " ++ (boardSecretKey board) ++ " publicKey: " ++ publicKey ++ " caption: " ++ caption
+  respond $ Wai.responseLBS
+    H.status200
+    [contentTypeJsonHeader]
+    (AE.encode $ ResponseBoard (boardSecretKey board) publicKey caption)
+
+
+
+getBoardProc :: Server -> Wai.Application
+getBoardProc server req respond = do
+  (params, _) <- Parse.parseRequestBody Parse.lbsBackEnd req -- parse post parameters
+
+  secretKey <- case Map.lookup "secret_key" $ Map.fromList params of
+    Nothing -> throwError 10001 "\"secret_key\" is not specified"
+    Just sk -> return $ T.unpack $ decodeUtf8 sk
+
+  mboard <- STM.atomically $ getBoard server secretKey
+  board <- case mboard of
+    Nothing -> throwError 10002 "\"secret_key\" is not found"
+    Just board -> return board
+
+  respond $ Wai.responseLBS
+    H.status200
+    [contentTypeJsonHeader]
+    ( AE.encode $ ResponseBoard secretKey (boardPublicKey board) (boardCaption board) )
+
+
+
+
+websocketApp :: Server -> WS.ServerApp
+websocketApp = undefined
+--websocketApp state pconn
+--  | ("/viewer"   == path) = viewerServer state pconn
+--  | ("/reporter" == path) = reporterServer state pconn
+--  | otherwise = WS.rejectRequest pconn "request rejected"
+--  where
+--    requestPath = WS.requestPath $ WS.pendingRequest pconn
+--    path = BS.takeWhile (/='?') requestPath
