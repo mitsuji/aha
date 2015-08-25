@@ -55,7 +55,7 @@ data Board = Board
   , boardNextViewerKey :: STM.TVar ViewerKey
   , boardViewers       :: STM.TVar (Map.Map ViewerKey Viewer)
   , boardReporters     :: STM.TVar (Map.Map ReporterKey Reporter)
-  , boardChan           :: STM.TChan Message
+  , boardChan          :: STM.TChan Message
   }
 
 newBoard :: BoardPublicKey -> Caption -> STM.STM Board
