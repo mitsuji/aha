@@ -38,23 +38,26 @@ import qualified Control.Concurrent.STM as STM
 
 
 
+type ReporterKey = String
 type ConnKey = Int
 
 -- reporterBroadcastChan
 data Reporter = Reporter
-  { reporterNextConnKey :: STM.TVar ConnKey
+  { reporterKey         :: ReporterKey
+  , reporterNextConnKey :: STM.TVar ConnKey
   , reporterConnections :: STM.TVar (Map.Map ConnKey WS.Connection)
   , reporterAha         :: STM.TVar Int
   , reporterChan        :: STM.TChan Message
   }
 
-newReporter :: STM.STM Reporter
-newReporter = do
+newReporter :: ReporterKey -> STM.STM Reporter
+newReporter rk = do
   nck   <- STM.newTVar 0
   conns <- STM.newTVar Map.empty
   aha   <- STM.newTVar 0
   chan  <- STM.newBroadcastTChan 
-  return Reporter { reporterNextConnKey = nck
+  return Reporter { reporterKey         = rk
+                  , reporterNextConnKey = nck
                   , reporterConnections = conns
                   , reporterAha         = aha
                   , reporterChan        = chan
@@ -67,7 +70,6 @@ data Viewer = Viewer WS.Connection
 
 type Caption = String
 type ViewerKey = Int
-type ReporterKey = String
 
 data Board = Board
   { boardSecretKey     :: BoardSecretKey
@@ -229,7 +231,7 @@ addReporter Board{..} rk = do
   if Map.member rk reporters
     then return $ Left ReporterKeyDuplicated
     else do
-      reporter <- newReporter
+      reporter <- newReporter rk
       STM.writeTVar boardReporters $ Map.insert rk reporter reporters
       return $ Right reporter
               
@@ -472,7 +474,6 @@ websocketApp server pconn
 
 
 viewerServer :: Server -> WS.ServerApp
---viewerServer = undefined
 viewerServer server pconn = do
   putStrLn $ "viewerServer: " ++ BS.unpack(requestPath) -- debug
 
@@ -519,76 +520,57 @@ viewerServer server pconn = do
   
 
 reporterServer :: Server -> WS.ServerApp
-reporterServer = undefined
---reporterServer server pconn = do
---  putStrLn $ "reporterServer: " ++ BS.unpack(requestPath) -- debug
---
---  boardPublicKey <- case Map.lookup "board_public_key" $ Map.fromList query of
---    Nothing -> throwError 20001 "\"board_public_key\" is not specified"
---    Just bpk -> return $ T.unpack $ decodeUtf8 bpk
---
---
-----  mboard <- STM.atomically $ getBoardFromPublicKey server publicKey
-----  board <- case mboard of
-----    Nothing -> throwError 20002 "\"secret_key\" is not found"
-----    Just board -> return board
---
---  board <- STM.atomically $ do
---    
---
---
---
-----  state <- readMVar vstate
-----  vboard <- case ServerState.boardFromPublicKey state boardPublicKey of
-----    Nothing -> throwError 20002 "\"board_public_key\" is not found"
-----    Just vboard -> return vboard
-----  
-----  reporterKey <- case Map.lookup "reporter_key" $ Map.fromList query of
-----    Just (brk) -> do
-----      let rk = T.unpack $ decodeUtf8 brk
-----      board <- readMVar vboard
-----      case Board.hasReporter board rk of
-----        True -> return rk
-----        False -> addReporter' vboard
-----    Nothing -> addReporter' vboard
---  
---  conn <- WS.acceptRequest pconn
---  WS.forkPingThread conn 30
---  
---  (board,connKey) <-modifyMVar vboard $ \board ->
---    case Board.addReporterConnection board reporterKey conn of
---      Left err@ReporterNotFound -> throwError 20005 ("Board.setReporterConnection failed: " ++ (show err))
---      Right r@(board',_) -> return (board',r)
---
---  WS.sendTextData conn $ AE.encode $ MessageReporter reporterKey boardPublicKey (Board.caption board)
---  WS.sendTextData conn $ AE.encode $ MessageTotalAha (Board.aha board)
---  
---  case Board.reporterAha board reporterKey of
---    Left err -> throwError 20006 ("Board.reporterAha failed: " ++ (show err))
---    Right aha -> WS.sendTextData conn $ AE.encode $ MessageAha aha
---
+reporterServer server pconn = do
+  putStrLn $ "reporterServer: " ++ BS.unpack(requestPath) -- debug
+
+  publicKey <- case Map.lookup "board_public_key" $ Map.fromList query of
+    Nothing -> throwError 20001 "\"board_public_key\" is not specified"
+    Just bpk -> return $ T.unpack $ decodeUtf8 bpk
+
+
+  mboard <- STM.atomically $ getBoardFromPublicKey server publicKey
+  board <- case mboard of
+    Nothing -> throwError 20002 "\"board_public_key\" is not found"
+    Just board -> return board
+
+
+  reporter <- case Map.lookup "reporter_key" $ Map.fromList query of
+    Nothing -> do
+      mreporter <- addReporterIO board
+      case mreporter of
+        Right r -> return r
+    Just (brk) -> do
+      let rk = T.unpack $ decodeUtf8 brk
+      mreporter <- STM.atomically $ getReporter board rk
+      case mreporter of
+        Just r -> return r
+        Nothing -> do
+          mreporter <- addReporterIO board
+          case mreporter of
+            Right r -> return r
+
+  conn <- WS.acceptRequest pconn
+  WS.forkPingThread conn 30
+
+
+  aha <- STM.atomically $ STM.readTVar (boardAha board)
+
+  WS.sendTextData conn $ AE.encode $
+       MessageReporter (reporterKey reporter) (boardPublicKey board) (boardCaption board)
+  WS.sendTextData conn $ AE.encode $ MessageTotalAha aha
+
+
 --  finally (reporterLoop conn vboard reporterKey) $ disconnect vboard reporterKey connKey
---    
---  where
---    requestPath = WS.requestPath $ WS.pendingRequest pconn
---    query = parseSimpleQuery $ BS.dropWhile (/='?') requestPath
---
-----    addReporter' vboard = do
-----      mreporterKey <- nextUUID
-----      reporterKey <- case mreporterKey of
-----        Nothing -> throwError 20003 "\"reporter_key\" is not generated"
-----        Just rk -> return $ UUID.toString rk
-----      modifyMVar_ vboard $ \board -> do
-----        case Board.addReporter board reporterKey of
-----          Left err -> throwError 20004 ("Board.addReporter failed: " ++ (show err))
-----          Right board' -> return board'
-----      return reporterKey                          
-----
-----    disconnect vboard reporterKey connKey =
-----      modifyMVar_ vboard $ \board ->
-----      case Board.delReporterConnection board reporterKey connKey of
-----        Left err -> throwError 20007 ("Board.closeReporterConnection failed: " ++ (show err))
-----        Right board' -> return board'
+    
+  where
+    requestPath = WS.requestPath $ WS.pendingRequest pconn
+    query = parseSimpleQuery $ BS.dropWhile (/='?') requestPath
+
+--    disconnect vboard reporterKey connKey =
+--      modifyMVar_ vboard $ \board ->
+--      case Board.delReporterConnection board reporterKey connKey of
+--        Left err -> throwError 20007 ("Board.closeReporterConnection failed: " ++ (show err))
+--        Right board' -> return board'
 
 
 --reporterLoop :: WS.Connection -> MVar Board -> ReporterKey -> IO ()
@@ -606,6 +588,5 @@ reporterServer = undefined
 --
 --  mapM_ (\c-> WS.sendTextData c $ AE.encode $ MessageTotalAha ta) (Board.viewerConnections board)
 --  mapM_ (\c-> WS.sendTextData c $ AE.encode $ MessageTotalAha ta) (Board.allReporterConnections board)
-
 
 
