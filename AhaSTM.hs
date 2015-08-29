@@ -36,6 +36,7 @@ import System.Posix.Signals(installHandler,sigINT,sigTERM,Handler(Catch))
 
 import qualified Control.Concurrent.STM as STM
 
+import Control.Concurrent.Async(race)
 
 
 type ReporterKey = String
@@ -210,9 +211,11 @@ resetBoard Board{..} = do
   reporters <- STM.readTVar boardReporters
   mapM_ (\r -> STM.writeTVar (reporterAha r) 0) (Map.elems reporters)
   STM.writeTVar boardAha 0
-  mapM_ (\r -> STM.writeTChan (reporterChan r) (MessageAha 0)) (Map.elems reporters)
-  STM.writeTChan boardChan (MessageTotalAha 0)
-
+--  mapM_ (\r -> STM.writeTChan (reporterChan r) (MessageAha 0)) (Map.elems reporters)
+--  STM.writeTChan boardChan (MessageTotalAha 0)
+  mapM_ (\r -> STM.writeTChan (reporterChan r) MessageReset) (Map.elems reporters)
+  STM.writeTChan boardChan MessageReset
+  
 
 
 
@@ -496,23 +499,21 @@ viewerServer server pconn = do
   WS.sendTextData conn $ AE.encode $ MessageBoard publicKey (boardCaption board)
   WS.sendTextData conn $ AE.encode $ MessageTotalAha aha
   
+  loop conn board
 
---  finally (viewerLoop conn vboard) $ disconnect vboard connKey
-  
   where
     requestPath = WS.requestPath $ WS.pendingRequest pconn
     query = parseSimpleQuery $ BS.dropWhile (/='?') requestPath
---    disconnect vboard connKey =
---      modifyMVar_ vboard $ \board -> return $ Board.delViewerConnection board connKey
 
-
---viewerLoop :: WS.Connection -> MVar Board -> IO ()
---viewerLoop conn vboard = forever $ do
---  msg <- WS.receiveData conn :: IO BS.ByteString
---  -- nothing to do
---  return ()
-
-
+    loop :: WS.Connection -> Board -> IO()
+    loop conn board@Board{..} = do
+      msg <- STM.atomically $ STM.readTChan boardChan
+      case msg of
+        MessageReset -> WS.sendTextData conn $ AE.encode msg
+        MessageTotalAha _ -> WS.sendTextData conn $ AE.encode msg
+        otherwise -> throwError 20003 "error"
+      loop conn board
+      
   
 
 
@@ -560,17 +561,11 @@ reporterServer server pconn = do
   WS.sendTextData conn $ AE.encode $ MessageTotalAha aha
 
 
---  finally (reporterLoop conn vboard reporterKey) $ disconnect vboard reporterKey connKey
+  reporterTalk conn board (reporterKey reporter)
     
   where
     requestPath = WS.requestPath $ WS.pendingRequest pconn
     query = parseSimpleQuery $ BS.dropWhile (/='?') requestPath
-
---    disconnect vboard reporterKey connKey =
---      modifyMVar_ vboard $ \board ->
---      case Board.delReporterConnection board reporterKey connKey of
---        Left err -> throwError 20007 ("Board.closeReporterConnection failed: " ++ (show err))
---        Right board' -> return board'
 
 
 --reporterLoop :: WS.Connection -> MVar Board -> ReporterKey -> IO ()
@@ -590,3 +585,18 @@ reporterServer server pconn = do
 --  mapM_ (\c-> WS.sendTextData c $ AE.encode $ MessageTotalAha ta) (Board.allReporterConnections board)
 
 
+reporterTalk :: WS.Connection -> Board ->  ReporterKey -> IO()
+reporterTalk conn board@Board{..} rk = do
+  race server receive
+  return()
+  where
+    server = do
+      msg <- STM.atomically $ STM.readTChan boardChan
+      case msg of
+        MessageAha _ -> WS.sendTextData conn $ AE.encode msg
+        MessageReset -> WS.sendTextData conn $ AE.encode msg
+        MessageTotalAha _ -> WS.sendTextData conn $ AE.encode msg
+        otherwise -> throwError 20003 "error"
+      server
+    
+    receive = undefined
