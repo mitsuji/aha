@@ -38,11 +38,11 @@ import qualified Control.Concurrent.STM as STM
 
 import Control.Concurrent.Async(race)
 
+import Control.Applicative ((<$>),(<*>))
+
 
 type ReporterKey = String
-type ConnKey = Int
 
--- reporterBroadcastChan
 data Reporter = Reporter
   { reporterKey         :: ReporterKey
   , reporterAha         :: STM.TVar Int
@@ -59,10 +59,9 @@ newReporter rk = do
                   }
 
 
-
-
+type BoardSecretKey = String
+type BoardPublicKey = String
 type Caption = String
-type ViewerKey = Int
 
 data Board = Board
   { boardSecretKey     :: BoardSecretKey
@@ -85,10 +84,7 @@ newBoard bsk bpk caption = do
                , boardReporters     = reporters
                , boardChan          = chan
                }
-  
 
-type BoardSecretKey = String
-type BoardPublicKey = String
   
 data Server = Server
   { serverBoards    :: STM.TVar (Map.Map BoardPublicKey Board)
@@ -102,6 +98,7 @@ newServer = do
   return Server { serverBoards = boards, serverBoardKeys = keys }
   
   
+
 
 data Message = MessageBoard BoardPublicKey Caption
              | MessageReporter ReporterKey BoardPublicKey Caption
@@ -155,9 +152,9 @@ addBoardIO server caption bpk
   | otherwise = do
     mubsk <- nextUUID
     case mubsk of
-      Nothing -> return $ Left BoardSecretKeyInvalid
-      Just ubsk ->
-        STM.atomically $ addBoard server caption (UUID.toString ubsk) bpk
+      Nothing   -> return $ Left BoardSecretKeyInvalid
+      Just ubsk -> STM.atomically $
+                   addBoard server caption (UUID.toString ubsk) bpk
   where
     isValidCaption cand = 0 < length cand && length cand <= 20
     isValidPublicKey cand = (all (\c -> elem c ("abcdefghijklmnopqrstuvwxyz0123456789" :: String) ) cand)
@@ -168,30 +165,33 @@ addBoardIO server caption bpk
 
 addBoard :: Server -> Caption -> BoardSecretKey -> BoardPublicKey -> STM.STM (Either Error Board)
 addBoard Server{..} caption bsk bpk = do
+
   boards <- STM.readTVar serverBoards
-  keys <- STM.readTVar serverBoardKeys
-  if Map.member bpk boards
-    then return $ Left BoardPublicKeyDuplicated
-    else if Map.member bsk keys
-         then return $ Left BoardSecretKeyDuplicated
-         else do
-           board <- newBoard bsk bpk caption
-           STM.writeTVar serverBoards    $ Map.insert bpk board boards
-           STM.writeTVar serverBoardKeys $ Map.insert bsk bpk keys
-           return $ Right board
+  keys   <- STM.readTVar serverBoardKeys
+
+  case () of
+    _ | Map.member bpk boards -> return $ Left BoardPublicKeyDuplicated
+      | Map.member bsk keys   -> return $ Left BoardSecretKeyDuplicated
+      | otherwise -> do
+        board <- newBoard bsk bpk caption
+        STM.writeTVar serverBoards    $ Map.insert bpk board boards
+        STM.writeTVar serverBoardKeys $ Map.insert bsk bpk keys
+        return $ Right board
 
 
 getBoardFromPublicKey :: Server -> BoardPublicKey -> STM.STM (Maybe Board)
-getBoardFromPublicKey Server{..} bpk = do
-  boards <- STM.readTVar serverBoards
-  board <- return $ Map.lookup bpk boards
-  return $ board
+getBoardFromPublicKey Server{..} bpk = 
+  (Map.lookup bpk) <$> STM.readTVar serverBoards
+  
 
 getBoardFromSecretKey :: Server -> BoardSecretKey -> STM.STM (Maybe Board)
 getBoardFromSecretKey server@Server{..} bsk = do
-  keys <- STM.readTVar serverBoardKeys
-  bpk <- return $ Map.lookup bsk keys
-  getBoardFromPublicKey server (fromJust bpk)
+  mbpk <- (Map.lookup bsk) <$> STM.readTVar serverBoardKeys
+  case mbpk of
+    Nothing  -> return $ Nothing
+    Just bpk -> getBoardFromPublicKey server bpk
+
+
 
 
 resetBoard :: Board -> STM.STM ()
@@ -212,9 +212,9 @@ addReporterIO :: Board -> IO (Either Error Reporter)
 addReporterIO board = do
   murk <- nextUUID
   case murk of
-    Nothing -> return $ Left ReporterKeyInvalid
-    Just urk ->
-      STM.atomically $ addReporter board (UUID.toString urk)
+    Nothing  -> return $ Left ReporterKeyInvalid
+    Just urk -> STM.atomically $
+                addReporter board (UUID.toString urk)
 
 
 addReporter :: Board -> ReporterKey -> STM.STM (Either Error Reporter)
@@ -229,10 +229,8 @@ addReporter Board{..} rk = do
               
 
 getReporter :: Board -> ReporterKey -> STM.STM (Maybe Reporter)
-getReporter Board{..} rk = do
-  reporters <- STM.readTVar boardReporters
-  reporter <- return $ Map.lookup rk reporters
-  return reporter
+getReporter Board{..} rk =
+  (Map.lookup rk) <$> STM.readTVar boardReporters
 
 
 
