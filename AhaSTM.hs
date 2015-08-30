@@ -45,28 +45,20 @@ type ConnKey = Int
 -- reporterBroadcastChan
 data Reporter = Reporter
   { reporterKey         :: ReporterKey
-  , reporterNextConnKey :: STM.TVar ConnKey
-  , reporterConnections :: STM.TVar (Map.Map ConnKey WS.Connection)
   , reporterAha         :: STM.TVar Int
   , reporterChan        :: STM.TChan Message
   }
 
 newReporter :: ReporterKey -> STM.STM Reporter
 newReporter rk = do
-  nck   <- STM.newTVar 0
-  conns <- STM.newTVar Map.empty
   aha   <- STM.newTVar 0
   chan  <- STM.newBroadcastTChan 
   return Reporter { reporterKey         = rk
-                  , reporterNextConnKey = nck
-                  , reporterConnections = conns
                   , reporterAha         = aha
                   , reporterChan        = chan
                   }
 
 
--- viewerBroadcastChan
-data Viewer = Viewer WS.Connection
 
 
 type Caption = String
@@ -77,8 +69,6 @@ data Board = Board
   , boardPublicKey     :: BoardPublicKey
   , boardCaption       :: Caption
   , boardAha           :: STM.TVar Int
-  , boardNextViewerKey :: STM.TVar ViewerKey
-  , boardViewers       :: STM.TVar (Map.Map ViewerKey Viewer)
   , boardReporters     :: STM.TVar (Map.Map ReporterKey Reporter)
   , boardChan          :: STM.TChan Message
   }
@@ -86,16 +76,12 @@ data Board = Board
 newBoard :: BoardSecretKey -> BoardPublicKey -> Caption -> STM.STM Board
 newBoard bsk bpk caption = do
   aha       <- STM.newTVar 0
-  nvk       <- STM.newTVar 0
-  viewers   <- STM.newTVar Map.empty
   reporters <- STM.newTVar Map.empty
   chan      <- STM.newBroadcastTChan 
   return Board { boardSecretKey     = bsk
                , boardPublicKey     = bpk
                , boardCaption       = caption
                , boardAha           = aha
-               , boardNextViewerKey = nvk
-               , boardViewers       = viewers
                , boardReporters     = reporters
                , boardChan          = chan
                }
@@ -164,8 +150,8 @@ data Error = BoardCaptionInvalid
 
 addBoardIO :: Server -> Caption -> BoardPublicKey -> IO (Either Error Board)
 addBoardIO server caption bpk
-  | not $ isValidCaption bpk   = return $ Left BoardCaptionInvalid
-  | not $ isValidPublicKey bpk = return $ Left BoardPublicKeyInvalid
+  | not $ isValidCaption caption = return $ Left BoardCaptionInvalid
+  | not $ isValidPublicKey bpk   = return $ Left BoardPublicKeyInvalid
   | otherwise = do
     mubsk <- nextUUID
     case mubsk of
@@ -174,8 +160,10 @@ addBoardIO server caption bpk
         STM.atomically $ addBoard server caption (UUID.toString ubsk) bpk
   where
     isValidCaption cand = 0 < length cand && length cand <= 20
-    isValidPublicKey cand = (all (\c -> elem c "abcdefghijklmnopqrstuvwxyz0123456789") cand)
+    isValidPublicKey cand = (all (\c -> elem c ("abcdefghijklmnopqrstuvwxyz0123456789" :: String) ) cand)
                             && (0 < length cand && length cand <= 20)
+
+
 
 
 addBoard :: Server -> Caption -> BoardSecretKey -> BoardPublicKey -> STM.STM (Either Error Board)
@@ -209,11 +197,12 @@ getBoardFromSecretKey server@Server{..} bsk = do
 resetBoard :: Board -> STM.STM ()
 resetBoard Board{..} = do
   reporters <- STM.readTVar boardReporters
-  mapM_ (\r -> STM.writeTVar (reporterAha r) 0) (Map.elems reporters)
+
+  -- reset all
   STM.writeTVar boardAha 0
---  mapM_ (\r -> STM.writeTChan (reporterChan r) (MessageAha 0)) (Map.elems reporters)
---  STM.writeTChan boardChan (MessageTotalAha 0)
-  mapM_ (\r -> STM.writeTChan (reporterChan r) MessageReset) (Map.elems reporters)
+  mapM_ (\r -> STM.writeTVar (reporterAha r) 0) (Map.elems reporters)
+
+  -- reset message
   STM.writeTChan boardChan MessageReset
   
 
@@ -274,35 +263,6 @@ ahaBoard Board{..} = do
 
 
 
-connectReporter :: Reporter -> WS.Connection -> STM.STM ConnKey
-connectReporter Reporter{..} conn = do
-  conns <- STM.readTVar reporterConnections
-  key <- STM.readTVar reporterNextConnKey
-  STM.writeTVar reporterConnections $ Map.insert key conn conns
-  let key' = key +1
-  STM.writeTVar reporterNextConnKey key'
-  aha <- STM.readTVar reporterAha
-  STM.writeTChan reporterChan $ MessageAha aha
-  return key'
-      
-
-disconnectReporter :: Reporter -> ConnKey -> STM.STM ()
-disconnectReporter Reporter{..} ck = do
-  conns <- STM.readTVar reporterConnections
-  STM.writeTVar reporterConnections $ Map.delete ck conns
-  
-
-
-connectViewer :: Board -> WS.Connection -> STM.STM (ViewerKey, Viewer)
-connectViewer = undefined
-
-disconnectViewer :: Board -> ViewerKey -> STM.STM ()
-disconnectViewer = undefined
-
-
-
-
-
 
 
 
@@ -313,7 +273,8 @@ disconnectViewer = undefined
 
 main :: IO ()
 main = do
-  host:port:backupPath:_ <- getArgs
+--  host:port:backupPath:_ <- getArgs
+  host:port:_ <- getArgs
   server <- newServer
   Warp.runSettings (
     Warp.setHost (fromString host) $
@@ -498,21 +459,22 @@ viewerServer server pconn = do
 
   WS.sendTextData conn $ AE.encode $ MessageBoard publicKey (boardCaption board)
   WS.sendTextData conn $ AE.encode $ MessageTotalAha aha
-  
-  loop conn board
+
+  chan <- STM.atomically $ STM.dupTChan $ boardChan board
+  loop conn chan
 
   where
     requestPath = WS.requestPath $ WS.pendingRequest pconn
     query = parseSimpleQuery $ BS.dropWhile (/='?') requestPath
 
-    loop :: WS.Connection -> Board -> IO()
-    loop conn board@Board{..} = do
-      msg <- STM.atomically $ STM.readTChan boardChan
+    loop :: WS.Connection -> STM.TChan Message -> IO()
+    loop conn chan = do
+      msg <- STM.atomically $ STM.readTChan chan
       case msg of
         MessageReset -> WS.sendTextData conn $ AE.encode msg
         MessageTotalAha _ -> WS.sendTextData conn $ AE.encode msg
         otherwise -> throwError 20003 "error"
-      loop conn board
+      loop conn chan
       
   
 
@@ -554,49 +516,49 @@ reporterServer server pconn = do
   WS.forkPingThread conn 30
 
 
-  aha <- STM.atomically $ STM.readTVar (boardAha board)
+  raha <- STM.atomically $ STM.readTVar (reporterAha reporter)
+  baha <- STM.atomically $ STM.readTVar (boardAha board)
 
   WS.sendTextData conn $ AE.encode $
        MessageReporter (reporterKey reporter) (boardPublicKey board) (boardCaption board)
-  WS.sendTextData conn $ AE.encode $ MessageTotalAha aha
+  WS.sendTextData conn $ AE.encode $ MessageAha raha
+  WS.sendTextData conn $ AE.encode $ MessageTotalAha baha
 
 
-  reporterTalk conn board (reporterKey reporter)
+  reporterTalk conn board reporter
     
   where
     requestPath = WS.requestPath $ WS.pendingRequest pconn
     query = parseSimpleQuery $ BS.dropWhile (/='?') requestPath
 
 
---reporterLoop :: WS.Connection -> MVar Board -> ReporterKey -> IO ()
---reporterLoop conn vboard reporterKey = forever $ do
---  msg <- WS.receiveData conn :: IO BS.ByteString
---  
---  (board, aha, ta) <- modifyMVar vboard $ \board ->
---    case Board.incrementReporterAha board reporterKey of
---      Left err -> throwError 20007 ("Board.incrementReporterAha failed: " ++ (show err))
---      Right r@(board', _, _) -> return (board', r)
---
---  case Board.reporterConnections board reporterKey of
---    Left err -> return ()
---    Right conns -> mapM_ (\c-> WS.sendTextData c $ AE.encode $ MessageAha aha) conns
---
---  mapM_ (\c-> WS.sendTextData c $ AE.encode $ MessageTotalAha ta) (Board.viewerConnections board)
---  mapM_ (\c-> WS.sendTextData c $ AE.encode $ MessageTotalAha ta) (Board.allReporterConnections board)
 
-
-reporterTalk :: WS.Connection -> Board ->  ReporterKey -> IO()
-reporterTalk conn board@Board{..} rk = do
-  race server receive
+reporterTalk :: WS.Connection -> Board ->  Reporter -> IO()
+reporterTalk conn board@Board{..} Reporter{..} = do
+  rchan <- STM.atomically $ STM.dupTChan reporterChan
+  bchan <- STM.atomically $ STM.dupTChan boardChan
+  race (server rchan bchan) receive
   return()
   where
-    server = do
-      msg <- STM.atomically $ STM.readTChan boardChan
+    server rchan bchan = race (rserver rchan) (bserver bchan)
+
+    rserver chan = do
+      msg <- STM.atomically $ STM.readTChan chan
       case msg of
         MessageAha _ -> WS.sendTextData conn $ AE.encode msg
+        otherwise -> throwError 20003 "error"
+      rserver chan
+
+    bserver chan = do
+      msg <- STM.atomically $ STM.readTChan chan
+      case msg of
         MessageReset -> WS.sendTextData conn $ AE.encode msg
         MessageTotalAha _ -> WS.sendTextData conn $ AE.encode msg
-        otherwise -> throwError 20003 "error"
-      server
-    
-    receive = undefined
+        otherwise -> throwError 20004 "error"
+      bserver chan
+
+    receive = do
+      msg <- WS.receiveData conn :: IO BS.ByteString
+      STM.atomically $ aha board reporterKey
+      receive
+
