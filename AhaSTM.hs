@@ -470,7 +470,7 @@ viewerServer server pconn = do
       case msg of
         MessageReset -> WS.sendTextData conn $ AE.encode msg
         MessageTotalAha _ -> WS.sendTextData conn $ AE.encode msg
-        otherwise -> throwError 20003 "error"
+        otherwise -> return ()
       loop conn chan
       
   
@@ -498,6 +498,7 @@ reporterServer server pconn = do
     Nothing -> do
       mreporter <- addReporterIO board
       case mreporter of
+        Left err -> throwError 0 ""
         Right r -> return r
     Just (brk) -> do
       let rk = T.unpack $ decodeUtf8 brk
@@ -507,6 +508,7 @@ reporterServer server pconn = do
         Nothing -> do
           mreporter <- addReporterIO board
           case mreporter of
+            Left err -> throwError 0 ""
             Right r -> return r
 
   conn <- WS.acceptRequest pconn
@@ -544,7 +546,7 @@ reporterTalk conn board@Board{..} Reporter{..} = do
       msg <- STM.atomically $ STM.readTChan chan
       case msg of
         MessageAha _ -> WS.sendTextData conn $ AE.encode msg
-        otherwise -> throwError 20003 "error"
+        otherwise -> return ()
       rserver chan
 
     bserver chan = do
@@ -552,7 +554,7 @@ reporterTalk conn board@Board{..} Reporter{..} = do
       case msg of
         MessageReset -> WS.sendTextData conn $ AE.encode msg
         MessageTotalAha _ -> WS.sendTextData conn $ AE.encode msg
-        otherwise -> throwError 20004 "error"
+        otherwise -> return ()
       bserver chan
 
     receive = do
