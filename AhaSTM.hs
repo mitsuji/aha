@@ -44,45 +44,45 @@ import Control.Applicative ((<$>),(<*>))
 type ReporterKey = String
 
 data Reporter = Reporter
-  { reporterKey         :: ReporterKey
-  , reporterAha         :: STM.TVar Int
-  , reporterChan        :: STM.TChan Message
+  { reporterKey  :: ReporterKey
+  , reporterAha  :: STM.TVar Int
+  , reporterChan :: STM.TChan Message
   }
 
 newReporter :: ReporterKey -> STM.STM Reporter
 newReporter rk = do
   aha   <- STM.newTVar 0
   chan  <- STM.newBroadcastTChan 
-  return Reporter { reporterKey         = rk
-                  , reporterAha         = aha
-                  , reporterChan        = chan
+  return Reporter { reporterKey  = rk
+                  , reporterAha  = aha
+                  , reporterChan = chan
                   }
 
 
 type BoardSecretKey = String
 type BoardPublicKey = String
-type Caption = String
+type BoardCaption   = String
 
 data Board = Board
-  { boardSecretKey     :: BoardSecretKey
-  , boardPublicKey     :: BoardPublicKey
-  , boardCaption       :: Caption
-  , boardAha           :: STM.TVar Int
-  , boardReporters     :: STM.TVar (Map.Map ReporterKey Reporter)
-  , boardChan          :: STM.TChan Message
+  { boardSecretKey :: BoardSecretKey
+  , boardPublicKey :: BoardPublicKey
+  , boardCaption   :: BoardCaption
+  , boardAha       :: STM.TVar Int
+  , boardReporters :: STM.TVar (Map.Map ReporterKey Reporter)
+  , boardChan      :: STM.TChan Message
   }
 
-newBoard :: BoardSecretKey -> BoardPublicKey -> Caption -> STM.STM Board
+newBoard :: BoardSecretKey -> BoardPublicKey -> BoardCaption -> STM.STM Board
 newBoard bsk bpk caption = do
   aha       <- STM.newTVar 0
   reporters <- STM.newTVar Map.empty
   chan      <- STM.newBroadcastTChan 
-  return Board { boardSecretKey     = bsk
-               , boardPublicKey     = bpk
-               , boardCaption       = caption
-               , boardAha           = aha
-               , boardReporters     = reporters
-               , boardChan          = chan
+  return Board { boardSecretKey = bsk
+               , boardPublicKey = bpk
+               , boardCaption   = caption
+               , boardAha       = aha
+               , boardReporters = reporters
+               , boardChan      = chan
                }
 
   
@@ -100,8 +100,8 @@ newServer = do
   
 
 
-data Message = MessageBoard BoardPublicKey Caption
-             | MessageReporter ReporterKey BoardPublicKey Caption
+data Message = MessageBoard BoardPublicKey BoardCaption
+             | MessageReporter ReporterKey BoardPublicKey BoardCaption
              | MessageAha Int
              | MessageTotalAha Int
              | MessageReset
@@ -135,47 +135,47 @@ instance ToJSON Message where
 
 
 
-data Error = BoardCaptionInvalid
+data Error = BoardSecretKeyInvalid
            | BoardPublicKeyInvalid
-           | BoardSecretKeyInvalid
-           | BoardPublicKeyDuplicated
+           | BoardCaptionInvalid
            | BoardSecretKeyDuplicated
+           | BoardPublicKeyDuplicated
            | ReporterKeyInvalid
            | ReporterKeyDuplicated
            deriving(Show)
 
 
-addBoardIO :: Server -> Caption -> BoardPublicKey -> IO (Either Error Board)
-addBoardIO server caption bpk
-  | not $ isValidCaption caption = return $ Left BoardCaptionInvalid
+addBoardIO :: Server -> BoardPublicKey -> BoardCaption -> IO (Either Error Board)
+addBoardIO server bpk caption
   | not $ isValidPublicKey bpk   = return $ Left BoardPublicKeyInvalid
+  | not $ isValidCaption caption = return $ Left BoardCaptionInvalid
   | otherwise = do
     mubsk <- nextUUID
     case mubsk of
       Nothing   -> return $ Left BoardSecretKeyInvalid
       Just ubsk -> STM.atomically $
-                   addBoard server caption (UUID.toString ubsk) bpk
+                   addBoard server (UUID.toString ubsk) bpk caption
   where
-    isValidCaption cand = 0 < length cand && length cand <= 20
     isValidPublicKey cand = (all (\c -> elem c ("abcdefghijklmnopqrstuvwxyz0123456789" :: String) ) cand)
                             && (0 < length cand && length cand <= 20)
+    isValidCaption cand = 0 < length cand && length cand <= 20
 
 
 
 
-addBoard :: Server -> Caption -> BoardSecretKey -> BoardPublicKey -> STM.STM (Either Error Board)
-addBoard Server{..} caption bsk bpk = do
+addBoard :: Server -> BoardSecretKey -> BoardPublicKey -> BoardCaption -> STM.STM (Either Error Board)
+addBoard Server{..} bsk bpk caption = do
 
-  boards <- STM.readTVar serverBoards
   keys   <- STM.readTVar serverBoardKeys
+  boards <- STM.readTVar serverBoards
 
   case () of
-    _ | Map.member bpk boards -> return $ Left BoardPublicKeyDuplicated
-      | Map.member bsk keys   -> return $ Left BoardSecretKeyDuplicated
+    _ | Map.member bsk keys   -> return $ Left BoardSecretKeyDuplicated
+      | Map.member bpk boards -> return $ Left BoardPublicKeyDuplicated
       | otherwise -> do
         board <- newBoard bsk bpk caption
-        STM.writeTVar serverBoards    $ Map.insert bpk board boards
         STM.writeTVar serverBoardKeys $ Map.insert bsk bpk keys
+        STM.writeTVar serverBoards    $ Map.insert bpk board boards
         return $ Right board
 
 
@@ -271,7 +271,6 @@ ahaBoard Board{..} = do
 
 main :: IO ()
 main = do
---  host:port:backupPath:_ <- getArgs
   host:port:_ <- getArgs
   server <- newServer
   Warp.runSettings (
@@ -296,7 +295,7 @@ throwError code msg = throwIO $ AhaException code msg
 
 
 data Response = ResponseError ErrorCode ErrorMessage
-              | ResponseBoard BoardSecretKey BoardPublicKey Caption
+              | ResponseBoard BoardSecretKey BoardPublicKey BoardCaption
               | ResponseReset
               deriving (Show)
 
@@ -383,7 +382,7 @@ addBoardProc server req respond = do
     Nothing -> throwError 10003 "\"caption\" is not specified"
     Just ca -> return $ T.unpack $ decodeUtf8 ca
 
-  eboard <- addBoardIO server caption publicKey
+  eboard <- addBoardIO server publicKey caption
   board <- case eboard of
     Left err@BoardCaptionInvalid      -> throwError 10004 ("addBoardIO failed: " ++ (show err))
     Left err@BoardSecretKeyDuplicated -> throwError 10005 ("addBoardIO failed: " ++ (show err))
@@ -513,9 +512,9 @@ reporterServer server pconn = do
   conn <- WS.acceptRequest pconn
   WS.forkPingThread conn 30
 
+  (raha,baha) <- STM.atomically $
+                 (,) <$> STM.readTVar (reporterAha reporter) <*> STM.readTVar (boardAha board)
 
-  raha <- STM.atomically $ STM.readTVar (reporterAha reporter)
-  baha <- STM.atomically $ STM.readTVar (boardAha board)
 
   WS.sendTextData conn $ AE.encode $
        MessageReporter (reporterKey reporter) (boardPublicKey board) (boardCaption board)
@@ -533,8 +532,9 @@ reporterServer server pconn = do
 
 reporterTalk :: WS.Connection -> Board ->  Reporter -> IO()
 reporterTalk conn board@Board{..} Reporter{..} = do
-  rchan <- STM.atomically $ STM.dupTChan reporterChan
-  bchan <- STM.atomically $ STM.dupTChan boardChan
+  (rchan, bchan) <- STM.atomically $
+                    (,) <$> STM.dupTChan reporterChan <*> STM.dupTChan boardChan
+  
   race (server rchan bchan) receive
   return()
   where
