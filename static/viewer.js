@@ -89,7 +89,7 @@ $(document).ready(function () {
 			if(data.success) {
 			    // ok
 			} else {
-			    alert('error: ' + data.error_code + ': ' + data.message);
+			    alert('error: ' + data.type);
 			}
 		    },
 		    'json'

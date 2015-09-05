@@ -40,6 +40,8 @@ import Control.Concurrent.Async(race)
 
 import Control.Applicative ((<$>),(<*>))
 
+import Data.Data(Data,toConstr)
+
 
 type ReporterKey = String
 
@@ -100,6 +102,27 @@ newServer = do
   
 
 
+data Response = ResponseBoard BoardSecretKey BoardPublicKey BoardCaption
+              | ResponseReset
+              deriving (Show)
+
+instance ToJSON Response where
+  toJSON (ResponseBoard sk pk ca) =
+    object ["success" .= True
+           ,"type"    .= ("board" :: String)
+           ,"content" .= object ["secret_key" .= sk
+                                ,"public_key" .= pk
+                                ,"caption"    .= ca
+                                ]
+           ]
+  toJSON (ResponseReset) =
+    object ["success" .= True
+           ,"type"    .= ("reset" :: String)
+           ,"content" .= ("ok" :: String)
+           ]
+
+
+
 data Message = MessageBoard BoardPublicKey BoardCaption
              | MessageReporter ReporterKey BoardPublicKey BoardCaption
              | MessageAha Int
@@ -136,13 +159,32 @@ instance ToJSON Message where
 
 
 data Error = BoardSecretKeyInvalid
-           | BoardPublicKeyInvalid
-           | BoardCaptionInvalid
            | BoardSecretKeyDuplicated
+           | BoardSecretKeyNotSpecified
+           | BoardPublicKeyInvalid
            | BoardPublicKeyDuplicated
+           | BoardPublicKeyNotSpecified
+           | BoardCaptionInvalid
+           | BoardCaptionNotSpecified
+           | BoardFromSecretKeyNotFound
+           | BoardFromPublicKeyNotFound
            | ReporterKeyInvalid
            | ReporterKeyDuplicated
-           deriving(Show)
+           | ReporterKeyNotSpecified       -- unused
+           | ReporterFromSecretKeyNotFound -- unused
+           deriving(Show,Typeable,Data)
+
+
+instance ToJSON Error where
+  toJSON (e) = simpleErrorJSON e
+
+simpleErrorJSON :: Error -> AE.Value
+simpleErrorJSON e = object ["success" .= False
+                             ,"type"    .= (show $ toConstr e)
+                             ]
+
+
+
 
 
 addBoardIO :: Server -> BoardPublicKey -> BoardCaption -> IO (Either Error Board)
@@ -282,42 +324,16 @@ main = do
   
 
 
-type ErrorCode = Int
-type ErrorMessage = String
-
-data AhaException = AhaException ErrorCode ErrorMessage deriving (Show,Typeable)
+data AhaException = AhaException Error deriving (Show,Typeable)
 instance Exception AhaException
 
-throwError :: ErrorCode -> ErrorMessage -> IO a
-throwError code msg = throwIO $ AhaException code msg
+throwErrorIO :: Error -> IO a
+throwErrorIO error = throwIO $ AhaException error
+
+throwErrorSTM :: Error -> STM.STM a
+throwErrorSTM error = STM.throwSTM $ AhaException error
 
 
-
-
-data Response = ResponseError ErrorCode ErrorMessage
-              | ResponseBoard BoardSecretKey BoardPublicKey BoardCaption
-              | ResponseReset
-              deriving (Show)
-
-instance ToJSON Response where
-  toJSON (ResponseError code msg) =
-    object ["success"    .= False
-           ,"error_code" .= code
-           ,"message"    .= msg
-           ]
-  toJSON (ResponseBoard sk pk ca) =
-    object ["success" .= True
-           ,"type"    .= ("board" :: String)
-           ,"content" .= object ["secret_key" .= sk
-                                ,"public_key" .= pk
-                                ,"caption"    .= ca
-                                ]
-           ]
-  toJSON (ResponseReset) =
-    object ["success" .= True
-           ,"type"    .= ("reset" :: String)
-           ,"content" .= ("ok" :: String)
-           ]
 
 
 contentTypeJsonHeader :: H.Header
@@ -334,12 +350,13 @@ plainOldHttpApp server req respond
     path = Wai.pathInfo req
 
     onError :: AhaException -> IO Wai.ResponseReceived
-    onError e@(AhaException code msg) =
+    onError (AhaException error) =
+      -- [TODO] log
       respond $ Wai.responseLBS
       H.status200
       [contentTypeJsonHeader]
-      (AE.encode $ ResponseError code msg)
-
+      (AE.encode error)
+    
 
 staticHttpApp :: Wai.Application
 staticHttpApp = Static.staticApp $ settings { Static.ssIndices = indices }
@@ -353,13 +370,13 @@ resetBoardProc server req respond = do
   (params, _) <- Parse.parseRequestBody Parse.lbsBackEnd req -- parse post parameters
 
   secretKey <- case Map.lookup "secret_key" $ Map.fromList params of
-    Nothing -> throwError 10001 "\"secret_key\" is not specified"
+    Nothing -> throwErrorIO BoardSecretKeyNotSpecified
     Just sk -> return $ T.unpack $ decodeUtf8 sk
 
   STM.atomically $ do
     mboard <- getBoardFromSecretKey server secretKey
     case mboard of
-      Nothing -> return () -- [TODO] throwError
+      Nothing -> throwErrorSTM BoardFromSecretKeyNotFound
       Just board -> resetBoard board
   
   respond $ Wai.responseLBS
@@ -375,20 +392,16 @@ addBoardProc server req respond = do
   (params, _) <- Parse.parseRequestBody Parse.lbsBackEnd req -- parse post parameters
 
   publicKey <- case Map.lookup "public_key" $ Map.fromList params of
-    Nothing -> throwError 10002 "\"public_key\" is not specified"
+    Nothing -> throwErrorIO BoardPublicKeyNotSpecified
     Just pk -> return $ T.unpack $ decodeUtf8 pk
 
   caption <- case Map.lookup "caption" $ Map.fromList params of
-    Nothing -> throwError 10003 "\"caption\" is not specified"
+    Nothing -> throwErrorIO BoardCaptionNotSpecified
     Just ca -> return $ T.unpack $ decodeUtf8 ca
 
   eboard <- addBoardIO server publicKey caption
   board <- case eboard of
-    Left err@BoardCaptionInvalid      -> throwError 10004 ("addBoardIO failed: " ++ (show err))
-    Left err@BoardSecretKeyDuplicated -> throwError 10005 ("addBoardIO failed: " ++ (show err))
-    Left err@BoardPublicKeyDuplicated -> throwError 10006 ("addBoardIO failed: " ++ (show err))
-    Left err@BoardSecretKeyInvalid    -> throwError 10007 ("addBoardIO failed: " ++ (show err))
-    Left err@BoardPublicKeyInvalid    -> throwError 10008 ("addBoardIO failed: " ++ (show err))
+    Left error  -> throwErrorIO error
     Right board -> return board
 
       
@@ -405,12 +418,12 @@ getBoardProc server req respond = do
   (params, _) <- Parse.parseRequestBody Parse.lbsBackEnd req -- parse post parameters
 
   secretKey <- case Map.lookup "secret_key" $ Map.fromList params of
-    Nothing -> throwError 10001 "\"secret_key\" is not specified"
+    Nothing -> throwErrorIO BoardSecretKeyNotSpecified
     Just sk -> return $ T.unpack $ decodeUtf8 sk
 
   mboard <- STM.atomically $ getBoardFromSecretKey server secretKey
   board <- case mboard of
-    Nothing -> throwError 10002 "\"secret_key\" is not found"
+    Nothing -> throwErrorIO BoardFromSecretKeyNotFound
     Just board -> return board
 
   respond $ Wai.responseLBS
@@ -423,15 +436,23 @@ getBoardProc server req respond = do
 
 websocketApp :: Server -> WS.ServerApp
 websocketApp server pconn
-  | ("/viewer"   == path) = viewerServer server pconn
-  | ("/reporter" == path) = reporterServer server pconn
-  | otherwise = WS.rejectRequest pconn "request rejected"
+  | ("/viewer"   == path) = (viewerServer server pconn)   `catch` onError
+  | ("/reporter" == path) = (reporterServer server pconn) `catch` onError
+  | otherwise = WS.rejectRequest pconn "endpoint not found"
   where
     requestPath = WS.requestPath $ WS.pendingRequest pconn
     path = BS.takeWhile (/='?') requestPath
 
+    onError :: AhaException -> IO()
+    onError (AhaException error) = do
+      -- [TODO] log
+      WS.rejectRequest pconn (BS.pack $ show error)
 
 
+onCloseError :: WS.Connection -> AhaException -> IO()
+onCloseError conn (AhaException error) = do
+  -- [TODO] log
+  WS.sendClose conn (BS.pack $ show error)
 
 
 viewerServer :: Server -> WS.ServerApp
@@ -439,12 +460,12 @@ viewerServer server pconn = do
   putStrLn $ "viewerServer: " ++ BS.unpack(requestPath) -- debug
 
   publicKey <- case Map.lookup "public_key" $ Map.fromList query of
-    Nothing -> throwError 20001 "\"public_key\" is not specified"
+    Nothing -> throwErrorIO BoardPublicKeyNotSpecified
     Just pk -> return $ T.unpack $ decodeUtf8 pk
 
   mboard <- STM.atomically $ getBoardFromPublicKey server publicKey
   board <- case mboard of
-    Nothing -> throwError 20002 "\"secret_key\" is not found"
+    Nothing -> throwErrorIO BoardFromPublicKeyNotFound
     Just board -> return board
 
 
@@ -458,7 +479,7 @@ viewerServer server pconn = do
   WS.sendTextData conn $ AE.encode $ MessageTotalAha aha
 
   chan <- STM.atomically $ STM.dupTChan $ boardChan board
-  loop conn chan
+  (loop conn chan) `catch` (onCloseError conn)
 
   where
     requestPath = WS.requestPath $ WS.pendingRequest pconn
@@ -484,32 +505,25 @@ reporterServer server pconn = do
   putStrLn $ "reporterServer: " ++ BS.unpack(requestPath) -- debug
 
   publicKey <- case Map.lookup "board_public_key" $ Map.fromList query of
-    Nothing -> throwError 20001 "\"board_public_key\" is not specified"
+    Nothing -> throwErrorIO BoardPublicKeyNotSpecified
     Just bpk -> return $ T.unpack $ decodeUtf8 bpk
 
 
   mboard <- STM.atomically $ getBoardFromPublicKey server publicKey
   board <- case mboard of
-    Nothing -> throwError 20002 "\"board_public_key\" is not found"
+    Nothing -> throwErrorIO BoardFromPublicKeyNotFound
     Just board -> return board
 
 
   reporter <- case Map.lookup "reporter_key" $ Map.fromList query of
-    Nothing -> do
-      mreporter <- addReporterIO board
-      case mreporter of
-        Left err -> throwError 0 ""
-        Right r -> return r
+    Nothing -> addReporter' board
     Just (brk) -> do
       let rk = T.unpack $ decodeUtf8 brk
       mreporter <- STM.atomically $ getReporter board rk
       case mreporter of
-        Just r -> return r
-        Nothing -> do
-          mreporter <- addReporterIO board
-          case mreporter of
-            Left err -> throwError 0 ""
-            Right r -> return r
+        Nothing -> addReporter' board -- [TODO] must be an error ?
+        Just reporter -> return reporter
+
 
   conn <- WS.acceptRequest pconn
   WS.forkPingThread conn 30
@@ -524,12 +538,17 @@ reporterServer server pconn = do
   WS.sendTextData conn $ AE.encode $ MessageTotalAha baha
 
 
-  reporterTalk conn board reporter
+  (reporterTalk conn board reporter) `catch` (onCloseError conn)
     
   where
     requestPath = WS.requestPath $ WS.pendingRequest pconn
     query = parseSimpleQuery $ BS.dropWhile (/='?') requestPath
 
+    addReporter' board = do
+      mreporter <- addReporterIO board
+      case mreporter of
+        Left error -> throwErrorIO error
+        Right reporter -> return reporter
 
 
 reporterTalk :: WS.Connection -> Board ->  Reporter -> IO()
