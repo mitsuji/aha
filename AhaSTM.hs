@@ -365,13 +365,21 @@ staticHttpApp = Static.staticApp $ settings { Static.ssIndices = indices }
     indices = fromJust $ toPieces ["admin.html"] -- default content
 
 
+lookupParams :: BS.ByteString -> [(BS.ByteString,BS.ByteString)] -> Maybe String
+lookupParams key params = do
+  b <- Map.lookup key $ Map.fromList params
+  return $ T.unpack $ decodeUtf8 b
+  
+
+
+
 resetBoardProc :: Server -> Wai.Application
 resetBoardProc server req respond = do
   (params, _) <- Parse.parseRequestBody Parse.lbsBackEnd req -- parse post parameters
 
-  secretKey <- case Map.lookup "secret_key" $ Map.fromList params of
+  secretKey <- case lookupParams "secret_key" params of
     Nothing -> throwErrorIO BoardSecretKeyNotSpecified
-    Just sk -> return $ T.unpack $ decodeUtf8 sk
+    Just sk -> return sk
 
   STM.atomically $ do
     mboard <- getBoardFromSecretKey server secretKey
@@ -391,13 +399,13 @@ addBoardProc :: Server -> Wai.Application
 addBoardProc server req respond = do
   (params, _) <- Parse.parseRequestBody Parse.lbsBackEnd req -- parse post parameters
 
-  publicKey <- case Map.lookup "public_key" $ Map.fromList params of
+  publicKey <- case lookupParams "public_key" params of
     Nothing -> throwErrorIO BoardPublicKeyNotSpecified
-    Just pk -> return $ T.unpack $ decodeUtf8 pk
+    Just pk -> return pk
 
-  caption <- case Map.lookup "caption" $ Map.fromList params of
+  caption <- case lookupParams "caption" params of
     Nothing -> throwErrorIO BoardCaptionNotSpecified
-    Just ca -> return $ T.unpack $ decodeUtf8 ca
+    Just ca -> return ca
 
   eboard <- addBoardIO server publicKey caption
   board <- case eboard of
@@ -417,9 +425,9 @@ getBoardProc :: Server -> Wai.Application
 getBoardProc server req respond = do
   (params, _) <- Parse.parseRequestBody Parse.lbsBackEnd req -- parse post parameters
 
-  secretKey <- case Map.lookup "secret_key" $ Map.fromList params of
+  secretKey <- case lookupParams "secret_key" params of
     Nothing -> throwErrorIO BoardSecretKeyNotSpecified
-    Just sk -> return $ T.unpack $ decodeUtf8 sk
+    Just sk -> return sk
 
   mboard <- STM.atomically $ getBoardFromSecretKey server secretKey
   board <- case mboard of
@@ -459,9 +467,9 @@ viewerServer :: Server -> WS.ServerApp
 viewerServer server pconn = do
   putStrLn $ "viewerServer: " ++ BS.unpack(requestPath) -- debug
 
-  publicKey <- case Map.lookup "public_key" $ Map.fromList query of
+  publicKey <- case lookupParams "public_key" query of
     Nothing -> throwErrorIO BoardPublicKeyNotSpecified
-    Just pk -> return $ T.unpack $ decodeUtf8 pk
+    Just pk -> return pk
 
   mboard <- STM.atomically $ getBoardFromPublicKey server publicKey
   board <- case mboard of
@@ -504,9 +512,9 @@ reporterServer :: Server -> WS.ServerApp
 reporterServer server pconn = do
   putStrLn $ "reporterServer: " ++ BS.unpack(requestPath) -- debug
 
-  publicKey <- case Map.lookup "board_public_key" $ Map.fromList query of
+  publicKey <- case lookupParams "board_public_key" query of
     Nothing -> throwErrorIO BoardPublicKeyNotSpecified
-    Just bpk -> return $ T.unpack $ decodeUtf8 bpk
+    Just bpk -> return bpk
 
 
   mboard <- STM.atomically $ getBoardFromPublicKey server publicKey
@@ -515,10 +523,9 @@ reporterServer server pconn = do
     Just board -> return board
 
 
-  reporter <- case Map.lookup "reporter_key" $ Map.fromList query of
+  reporter <- case lookupParams "reporter_key" query of
     Nothing -> addReporter' board
-    Just (brk) -> do
-      let rk = T.unpack $ decodeUtf8 brk
+    Just (rk) -> do
       mreporter <- STM.atomically $ getReporter board rk
       case mreporter of
         Nothing -> addReporter' board -- [TODO] must be an error ?
