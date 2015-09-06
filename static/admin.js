@@ -74,7 +74,7 @@ $(document).ready(function () {
 		    load();
 		    
 		} else {
-		    alert('error: ' + data.error_code + ': ' + data.message);
+		    alert('error: ' + data.type);
 		}
 	    },
 	    'json'
@@ -105,7 +105,7 @@ $(document).ready(function () {
 		    if(data.success) {
 			onBoard(data.content);
 		    } else {
-			alert('error: ' + data.error_code + ': ' + data.message);
+			alert('error: ' + data.type);
 		    }
 		},
 		'json'
