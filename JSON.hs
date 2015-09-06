@@ -29,6 +29,7 @@ data ReporterJO = ReporterJO
   { jReporterKey  :: ReporterKey
   , jReporterAha  :: Int
   }
+  deriving (Show)
 
 instance ToJSON ReporterJO where
   toJSON ReporterJO{..} =
@@ -51,6 +52,7 @@ data BoardJO = BoardJO
   , jBoardAha       :: Int
   , jBoardReporters :: Map.Map ReporterKey ReporterJO
   }
+  deriving (Show)
 
 instance ToJSON BoardJO where
   toJSON BoardJO{..} =
@@ -65,7 +67,7 @@ instance FromJSON BoardJO where
   parseJSON (Object v) = BoardJO
                          <$> v .: "secretKey"
                          <*> v .: "publicKey"
-                         <*> v .: "captiona"
+                         <*> v .: "caption"
                          <*> v .: "aha"
                          <*> v .: "reporters"
   parseJSON _ = mzero
@@ -76,6 +78,7 @@ data ServerJO = ServerJO
   { jServerBoards    :: Map.Map BoardPublicKey BoardJO
   , jServerBoardKeys :: Map.Map BoardSecretKey BoardPublicKey
   }
+  deriving (Show)
 
 instance ToJSON ServerJO where
   toJSON ServerJO{..} =
@@ -112,8 +115,8 @@ reporterFromJO ReporterJO{..} = do
 
 boardToJO :: Board -> STM.STM BoardJO
 boardToJO Board{..} = do
-  aha <- STM.readTVar boardAha
-  reporters <- STM.readTVar boardReporters
+  aha        <- STM.readTVar boardAha
+  reporters  <- STM.readTVar boardReporters
   reporters' <- reportersToJOs reporters
   return BoardJO { jBoardSecretKey = boardSecretKey
                  , jBoardPublicKey = boardPublicKey

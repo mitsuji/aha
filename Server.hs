@@ -26,16 +26,16 @@ module Server (
   ) where
 
 
-import Data.Data(Data,toConstr)
+import Data.Data (Data,toConstr)
 import Control.Applicative ((<$>),(<*>))
 import Data.Typeable (Typeable)
 import qualified Data.Map as Map
 import Data.UUID.V1 (nextUUID)
 import qualified Data.UUID as UUID
-import Data.Aeson.Types(ToJSON,toJSON,object,(.=))
+import Data.Aeson.Types (ToJSON,toJSON,object,(.=))
 import qualified Data.Aeson as AE
 import qualified Control.Concurrent.STM as STM
-import Control.Concurrent.Async(race)
+import Control.Concurrent.Async (race)
 
 
 
@@ -169,7 +169,7 @@ data Error = BoardSecretKeyInvalid
            | ReporterKeyDuplicated
            | ReporterKeyNotSpecified       -- unused
            | ReporterFromSecretKeyNotFound -- unused
-           deriving(Show,Typeable,Data)
+           deriving (Show,Typeable,Data)
 
 
 instance ToJSON Error where

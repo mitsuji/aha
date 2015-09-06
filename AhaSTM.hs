@@ -5,6 +5,8 @@
 
 import Data.String (fromString)
 import System.Environment (getArgs)
+import System.IO (withFile,IOMode(ReadMode,WriteMode))
+import System.Posix.Signals (installHandler,sigINT,sigTERM,Handler(Catch))
 import qualified Network.Wai.Handler.Warp as Warp
 import qualified Network.Wai as Wai
 import qualified Network.Wai.Application.Static as Static
@@ -19,15 +21,13 @@ import Data.Typeable (Typeable)
 import Control.Exception (Exception,catch,throwIO,throwTo,finally)
 import Control.Monad (forever,void)
 import qualified Data.ByteString.Char8 as BS -- use for input 
+import qualified Data.ByteString.Lazy.Char8 as LBS -- use for output
 import qualified Data.Text as T
 import Data.Text.Encoding (decodeUtf8)
 import qualified Data.Map as Map
 import Data.Maybe (fromJust)
 import Network.HTTP.Types.URI (parseSimpleQuery)
 import qualified Data.Aeson as AE
-
-import System.IO(withFile,IOMode(ReadMode,WriteMode))
-import System.Posix.Signals(installHandler,sigINT,sigTERM,Handler(Catch))
 
 import Control.Applicative ((<$>),(<*>))
 import qualified Control.Concurrent.STM as STM
@@ -39,20 +39,60 @@ import JSON
 
 
 
-
-
-
 main :: IO ()
 main = do
-  host:port:_ <- getArgs
-  server <- newServer
+  host:port:backupPath:_ <- getArgs
+  server <- restoreServer backupPath
+  threadBackup <- forkIO $ backupServer server backupPath -- fork backup thread
   Warp.runSettings (
     Warp.setHost (fromString host) $
     Warp.setPort (read port) $
+    Warp.setInstallShutdownHandler (installShutdownHandler threadBackup) $
     Warp.defaultSettings
     ) $ websocketsOr WS.defaultConnectionOptions (websocketApp server) (plainOldHttpApp server)
 
   
+-- [TODO] change to UserInterrupt
+data StopException = StopException deriving (Show,Typeable)
+instance Exception StopException
+
+
+installShutdownHandler :: ThreadId -> IO () -> IO ()
+installShutdownHandler threadBackup close = do
+  void $ installHandler sigINT (Catch shutdown) Nothing
+  void $ installHandler sigTERM (Catch shutdown) Nothing
+  where
+    shutdown = do
+      -- [TODO] last backup before shutdown
+      close
+      throwTo threadBackup StopException
+  
+
+restoreServer :: String -> IO Server
+restoreServer path = do
+  putStrLn "restore: "
+  json <- withFile path ReadMode BS.hGetContents
+  case AE.decodeStrict json of
+    Nothing -> newServer
+    Just jo -> STM.atomically $ serverFromJO jo
+
+
+backupServer ::  Server -> String -> IO ()
+backupServer server path =
+  -- [TODO] mask exception
+  loop `catch` onException
+  where
+    loop = do 
+      putStrLn "backup: "
+      jo <- serverToJO server
+      withFile path WriteMode ( \h -> LBS.hPutStrLn h $ AE.encode jo )
+      threadDelay $ 30 * 1000 * 1000
+      loop
+
+    onException :: StopException -> IO ()
+    onException e = return ()
+
+
 
 
 data AhaException = AhaException Error deriving (Show,Typeable)
