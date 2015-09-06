@@ -31,7 +31,7 @@ import qualified Data.Aeson as AE
 
 import Control.Applicative ((<$>),(<*>))
 import qualified Control.Concurrent.STM as STM
-import Control.Concurrent.Async(race)
+import Control.Concurrent.Async (race)
 
 import Server
 import JSON
@@ -222,13 +222,13 @@ websocketApp server pconn
     requestPath = WS.requestPath $ WS.pendingRequest pconn
     path = BS.takeWhile (/='?') requestPath
 
-    onError :: AhaException -> IO()
+    onError :: AhaException -> IO ()
     onError (AhaException error) = do
       -- [TODO] log
       WS.rejectRequest pconn (BS.pack $ show error)
 
 
-onCloseError :: WS.Connection -> AhaException -> IO()
+onCloseError :: WS.Connection -> AhaException -> IO ()
 onCloseError conn (AhaException error) = do
   -- [TODO] log
   WS.sendClose conn (BS.pack $ show error)
@@ -264,7 +264,7 @@ viewerServer server pconn = do
     requestPath = WS.requestPath $ WS.pendingRequest pconn
     query = parseSimpleQuery $ BS.dropWhile (/='?') requestPath
 
-    loop :: WS.Connection -> STM.TChan Message -> IO()
+    loop :: WS.Connection -> STM.TChan Message -> IO ()
     loop conn chan = do
       msg <- STM.atomically $ STM.readTChan chan
       case msg of
@@ -329,7 +329,7 @@ reporterServer server pconn = do
         Right reporter -> return reporter
 
 
-reporterTalk :: WS.Connection -> Board ->  Reporter -> IO()
+reporterTalk :: WS.Connection -> Board -> Reporter -> IO ()
 reporterTalk conn board@Board{..} Reporter{..} = do
   (rchan, bchan) <- STM.atomically $
                     (,) <$> STM.dupTChan reporterChan <*> STM.dupTChan boardChan
