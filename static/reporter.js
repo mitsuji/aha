@@ -86,6 +86,10 @@ $(document).ready(function () {
 		ws.send('aha');
 	    });
 	}
+
+	$(this).gShake(function() { 
+	    ws.send('aha');
+	});
     }
 
     
